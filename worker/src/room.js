@@ -36,6 +36,9 @@ export class RoomDO {
     if (path === "/event" && request.method === "POST") {
       return this.handleEvent(request);
     }
+    if (path === "/ws") {
+      return this.handleWebSocket(request);
+    }
     return jsonResponse({ error: "not found" }, 404);
   }
 
@@ -138,6 +141,25 @@ export class RoomDO {
     await this.scheduleExpiry();
     this.broadcast({ type: "event", event });
     return jsonResponse({ ok: true });
+  }
+
+  async handleWebSocket(request) {
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return jsonResponse({ error: "expected websocket upgrade" }, 426);
+    }
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    server.accept();
+    this.sockets.add(server);
+
+    const mode = (await this.state.storage.get("mode")) ?? null;
+    const backlog = (await this.state.storage.get("events")) ?? [];
+    server.send(JSON.stringify({ type: "init", mode, backlog }));
+
+    server.addEventListener("close", () => this.sockets.delete(server));
+    server.addEventListener("error", () => this.sockets.delete(server));
+
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   broadcast(message) {
