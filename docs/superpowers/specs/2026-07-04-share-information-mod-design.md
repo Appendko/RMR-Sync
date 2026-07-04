@@ -1,4 +1,4 @@
-# share_information_mod — Design Spec
+# RMR Sync — Design Spec
 
 ## Context
 
@@ -8,7 +8,7 @@ RouteMatriX Randomizer (RMR) combines Mega Man X1–X3 into a single randomizer.
 - **`ref/RMR_progress_tracker_displayer_ver_js_20260126/`** — A companion Lua script that reads game memory (items, checks, deaths, clear status, current title) and writes it to a local JS file, which a local HTML page reads to render a visual progress tracker using purpose-built icon assets (per-game, per-boss, per-weapon).
 - **`ref/aaa/`** — A real generated seed pack (ROMs, `boot.lua`, `spoiler.txt`, `save.txt`, savestates), kept as a concrete reference example. It's what confirmed the room-key format used below (see "Appendix: room-key verification").
 
-Both are local-only: everything happens on one machine, for one player. **`share_information_mod`** is a new, standalone companion mod that extends this to *multiple real players on separate machines, playing the same seed*, who want to:
+Both are local-only: everything happens on one machine, for one player. **RMR Sync** is a new, standalone companion mod that extends this to *multiple real players on separate machines, playing the same seed*, who want to:
 
 1. Share **checksSeen** (which locations have been scouted/hinted) across the group — pure intel, OR-merged, no gameplay/item advantage.
 2. See a **live event feed** of each other's item pickups (e.g. "ds83171: [icon][icon]"), shown on a shared web tracker — a social/awareness feature, reusing the existing icon assets.
@@ -92,7 +92,7 @@ A new page, separate from the existing progress displayer. Opened locally with `
 ## Repo layout
 
 ```
-share_information_mod/
+RMR_sync/
 ├── .gitignore              # ignores /ref
 ├── README.md
 ├── lua/
