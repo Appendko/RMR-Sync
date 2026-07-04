@@ -28,7 +28,7 @@ Both features ship together in v1 since they share the same backend, session key
   - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS, so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed.
 - **Tracker and admin page hosting**: static local HTML files (same pattern as the existing `index.html` displayer), opened directly — no deploy pipeline for v1.
 - **Hosting model: a default shared instance, but "bring your own backend" is fully supported.** Technically one Worker deployment can serve unlimited independent rooms — each room key (`param`) maps to its own isolated Durable Object instance via `idFromName`, so unrelated groups on different seeds never interact even on a shared Worker. Practically, a single publicly-shared instance risks exhausting Cloudflare's free-tier daily request cap if adoption grows, and makes one person's account a single point of failure for everyone. So: the maintainer hosts a default instance for convenience (zero-setup for casual users), but `worker_url` remains a plain config value in both `share_config.txt` and the admin page — any group can deploy their own Worker (see `worker/README.md`) and point their own config at it, with no code changes needed. This matters in particular because the default instance is not guaranteed to stay up long-term (the maintainer may repurpose their Cloudflare account later).
-- **No auth token on admin endpoints for v1.** This mod targets a small trusted friend group, not a public/competitive race — anyone who knows the room key could technically call `/reset` directly, but in practice only the organizer opens the admin page. Flagging this as a known simplification rather than an oversight; worth revisiting if this ever supports larger or less-trusted groups.
+- **Admin secret, separate from the room key.** The room key (Option string) can't be treated as a secret in practice — it's shown on-screen in-game, so anyone watching a stream sees it, not just the players. That means it reaches a much wider audience than intended (tracker viewers, stream chat), so it can't also be the thing that authorizes destructive admin actions. The organizer picks a separate **admin secret** when creating the room (via `host_admin.html`); the Worker stores it and requires it on `POST /admin/reset`. Knowing the room key alone (enough to sync as a player or watch the tracker) is not enough to reset a room.
 - **`boot.lua` and the existing progress tracker stay untouched.** This mod is purely additive: a new companion Lua script, a new backend, a new admin webpage, and a new (separate) HTML tracker page for the event feed.
 
 ## Architecture
@@ -59,9 +59,9 @@ Per-room DO state: `mode` (`"checksSeen"` | `"checksSeen+items"`), `checksSeen` 
 Endpoints, all under `/room/{param}/...`:
 
 Admin (called by `host_admin.html`, needs CORS headers + `OPTIONS` preflight handling):
-- `POST /admin/init` — creates the room and sets `mode` if not already set (idempotent no-op otherwise).
-- `POST /admin/reset` — clears `checksSeen` and the event log (for starting a fresh run on the same room), keeps `mode`.
-- `GET /admin/status` — returns `mode`, a summary of `checksSeen`, event count, and connected WebSocket count.
+- `POST /admin/init` — body `{mode, adminSecret}`; creates the room, sets `mode`, and stores `adminSecret` if the room doesn't exist yet (idempotent no-op otherwise — a repeat call just returns the existing mode, no secret comparison needed since nothing is mutated).
+- `POST /admin/reset` — body `{adminSecret}`; clears `checksSeen` and the event log (for starting a fresh run on the same room), keeps `mode`. Rejected (403) if `adminSecret` is missing or doesn't match what was set at creation.
+- `GET /admin/status` — returns `mode`, a summary of `checksSeen`, event count, and connected WebSocket count. No secret required — read-only, and the counts aren't sensitive.
 
 Player (called by `share_info.lua` via `comm.http*`, no browser/CORS involved):
 - `POST /sync` — body: local `checksSeen` bytes → OR-merges into room state, responds with the fully merged bytes. Covers both push and pull in one round trip, mirroring `boot.lua`'s own `synchronize_or` pattern one level up (device → server → device). Fails clearly if the room hasn't been created yet (host must run `/admin/init` first).
@@ -81,7 +81,7 @@ Main loop, polled every few seconds (matching the existing tracker's `cWaitFrame
 
 ## Admin webpage (`admin/host_admin.html`)
 
-A static local HTML page the session organizer opens (not a player-facing tool, and doesn't require BizHawk at all). Fields to create a room: room key (the Option string, copy-pasted from `spoiler.txt`) and share mode. Buttons for reset and a live status view (polls `/admin/status`). Talks to the Worker via plain `fetch()`.
+A static local HTML page the session organizer opens (not a player-facing tool, and doesn't require BizHawk at all). Fields to create a room: room key (the Option string, copy-pasted from `spoiler.txt`), share mode, and an admin secret of the organizer's choosing (kept private — not shared with players or stream viewers, unlike the room key). Buttons for reset (requires the admin secret) and a live status view (polls `/admin/status`, no secret needed). Talks to the Worker via plain `fetch()`.
 
 ## Event-feed tracker (`tracker/event_feed.html`)
 

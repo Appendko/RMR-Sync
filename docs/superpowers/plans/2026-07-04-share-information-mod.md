@@ -16,6 +16,7 @@
 - `checksSeen` is always exactly 96 bytes (32 bytes × 3 titles), matching `boot.lua`'s `addrChecksSeen` region.
 - Event log is capped at the 200 most recent entries.
 - Valid room `mode` values are exactly `"checksSeen"` and `"checksSeen+items"` — no other strings.
+- The room key (URL path segment) is **not** a secret — it's shown on-screen in-game, visible to stream viewers. It must never gate a destructive action. `POST /admin/reset` requires a separate `adminSecret`, chosen by the organizer at room creation and never returned by any endpoint (including `/admin/status`). `POST /admin/init` requires `adminSecret` too (stored on first creation; ignored on subsequent idempotent calls, since nothing is mutated then).
 - CORS: every non-WebSocket Worker response gets `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type`; `OPTIONS` requests get a 204 with those headers and no body.
 - Node.js v24 and Wrangler (via `npx wrangler`) are already installed and authenticated in `worker/` (done earlier in this session — `npx wrangler whoami` should show a logged-in account). Do not re-run `wrangler login` unless it reports being logged out.
 - `worker/wrangler.toml` currently still has the throwaway test config (`name = "rmr-share-test"`, binding `TEST_DO`/class `TestDO`) — Task 1 replaces it with the real one. The throwaway Worker was already deleted from Cloudflare (`wrangler delete`), so there's no conflicting deployment.
@@ -137,7 +138,7 @@ git commit -m "Scaffold real Worker project with vitest-pool-workers test harnes
 
 **Interfaces:**
 - Produces: `orMergeBytes(a: number[], b: number[]): number[]`, `countSetBits(bytes: number[]): number`
-- Produces: `isValidMode(mode: any): boolean`, `isValidChecksSeenArray(arr: any): boolean`, `validateEventBody(body: any): string | null` (returns an error message, or `null` if valid)
+- Produces: `isValidMode(mode: any): boolean`, `isValidChecksSeenArray(arr: any): boolean`, `validateEventBody(body: any): string | null` (returns an error message, or `null` if valid), `isValidAdminSecret(secret: any): boolean` (non-empty string, up to 100 characters — used both when a room is created and when authorizing `/admin/reset`, see Task 3)
 - Produces: `withCors(response: Response): Response`, `handleOptions(): Response`
 
 - [ ] **Step 1: Write failing tests for `bits.js`**
@@ -216,7 +217,7 @@ Create `worker/test/validation.test.js`:
 
 ```js
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, validateEventBody } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the two known modes", () => {
@@ -295,6 +296,20 @@ describe("validateEventBody", () => {
     expect(validateEventBody("nope")).toMatch(/object/);
   });
 });
+
+describe("isValidAdminSecret", () => {
+  it("accepts a non-empty string up to 100 characters", () => {
+    expect(isValidAdminSecret("my-secret")).toBe(true);
+    expect(isValidAdminSecret("x".repeat(100))).toBe(true);
+  });
+
+  it("rejects empty, oversized, or non-string values", () => {
+    expect(isValidAdminSecret("")).toBe(false);
+    expect(isValidAdminSecret("x".repeat(101))).toBe(false);
+    expect(isValidAdminSecret(undefined)).toBe(false);
+    expect(isValidAdminSecret(123)).toBe(false);
+  });
+});
 ```
 
 - [ ] **Step 6: Run it and confirm it fails**
@@ -335,6 +350,10 @@ export function validateEventBody(body) {
   }
   return null;
 }
+
+export function isValidAdminSecret(secret) {
+  return typeof secret === "string" && secret.length > 0 && secret.length <= 100;
+}
 ```
 
 Item IDs are raw numeric bit-offsets (0-767, covering the 96-byte/768-bit items array across X1/X2/X3 — see Task 15), not display strings. Resolving an ID to an icon and a human-readable label is entirely the tracker's job (Task 10/11), using the same `RMR_progress_tracker_id_maps.js` data the original progress tracker uses — the Worker never needs to know what an ID "means."
@@ -343,7 +362,7 @@ Item IDs are raw numeric bit-offsets (0-767, covering the 96-byte/768-bit items 
 
 ```bash
 git add worker/src/validation.js worker/test/validation.test.js
-git commit -m "Add input validation helpers for mode/checksSeen/event bodies"
+git commit -m "Add input validation helpers for mode/checksSeen/event/admin-secret bodies"
 ```
 
 - [ ] **Step 9: Write failing tests for `cors.js`**
@@ -426,8 +445,10 @@ git commit -m "Add CORS response helpers"
 - Create: `worker/test/room-admin.test.js`
 
 **Interfaces:**
-- Consumes: `countSetBits` from `worker/src/bits.js` (Task 2), `isValidMode` from `worker/src/validation.js` (Task 2)
-- Produces: `export class RoomDO` with a `fetch(request: Request): Promise<Response>` method, routing `POST /admin/init`, `GET /admin/status`, `POST /admin/reset` (more routes added in later tasks). DO storage keys used: `"mode"` (string), `"checksSeen"` (96-length number array), `"events"` (array, empty until Task 5).
+- Consumes: `countSetBits` from `worker/src/bits.js` (Task 2), `isValidMode`/`isValidAdminSecret` from `worker/src/validation.js` (Task 2)
+- Produces: `export class RoomDO` with a `fetch(request: Request): Promise<Response>` method, routing `POST /admin/init`, `GET /admin/status`, `POST /admin/reset` (more routes added in later tasks). DO storage keys used: `"mode"` (string), `"adminSecret"` (string, set once at creation, never exposed by `/admin/status`), `"checksSeen"` (96-length number array), `"events"` (array, empty until Task 5).
+
+**Design note — admin secret vs. room key.** The room key (the URL segment, e.g. `/room/<option-string>/...`) is not a secret in practice — it's shown on-screen in-game, so anyone watching a stream sees it. `POST /admin/reset` is destructive, so it can't be authorized by something that public. The organizer picks a separate `adminSecret` when creating the room; it's required on every `/admin/reset` call afterward and is never returned by any endpoint (including `/admin/status`).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -442,40 +463,38 @@ function getStub(roomName) {
   return env.ROOM.get(id);
 }
 
+function postJson(stub, path, body) {
+  return stub.fetch(`https://do${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("RoomDO admin lifecycle", () => {
   it("creates a room with the given mode", async () => {
     const stub = getStub("test-room-init-1");
-    const res = await stub.fetch("https://do/admin/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen" }),
-    });
+    const res = await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ mode: "checksSeen", created: true });
   });
 
-  it("is idempotent on repeated init calls", async () => {
+  it("is idempotent on repeated init calls, ignoring the second caller's secret", async () => {
     const stub = getStub("test-room-init-2");
-    await stub.fetch("https://do/admin/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen" }),
-    });
-    const res = await stub.fetch("https://do/admin/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen+items" }),
-    });
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "first-secret" });
+    const res = await postJson(stub, "/admin/init", { mode: "checksSeen+items", adminSecret: "second-secret" });
     expect(await res.json()).toEqual({ mode: "checksSeen", created: false });
   });
 
   it("rejects an invalid mode", async () => {
     const stub = getStub("test-room-init-3");
-    const res = await stub.fetch("https://do/admin/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "not-a-real-mode" }),
-    });
+    const res = await postJson(stub, "/admin/init", { mode: "not-a-real-mode", adminSecret: "s3cr3t" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an invalid or missing admin secret on creation", async () => {
+    const stub = getStub("test-room-init-4");
+    const res = await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "" });
     expect(res.status).toBe(400);
   });
 
@@ -485,23 +504,43 @@ describe("RoomDO admin lifecycle", () => {
     expect(await res.json()).toEqual({ mode: null, checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
+  it("never exposes the admin secret via status", async () => {
+    const stub = getStub("test-room-status-2");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.adminSecret).toBeUndefined();
+  });
+
   it("returns 404 for an unknown path", async () => {
     const stub = getStub("test-room-404-1");
     const res = await stub.fetch("https://do/nope");
     expect(res.status).toBe(404);
   });
 
-  it("resets checksSeen and events but keeps mode", async () => {
+  it("resets checksSeen and events but keeps mode, given the correct admin secret", async () => {
     const stub = getStub("test-room-reset-1");
-    await stub.fetch("https://do/admin/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen+items" }),
-    });
-    const res = await stub.fetch("https://do/admin/reset", { method: "POST" });
+    await postJson(stub, "/admin/init", { mode: "checksSeen+items", adminSecret: "s3cr3t" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t" });
     expect(await res.json()).toEqual({ ok: true });
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status).toEqual({ mode: "checksSeen+items", checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
+  });
+
+  it("rejects reset with a missing or wrong admin secret", async () => {
+    const stub = getStub("test-room-reset-2");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "correct-secret" });
+
+    const wrongRes = await postJson(stub, "/admin/reset", { adminSecret: "wrong-secret" });
+    expect(wrongRes.status).toBe(403);
+
+    const missingRes = await stub.fetch("https://do/admin/reset", { method: "POST" });
+    expect(missingRes.status).toBe(403);
+  });
+
+  it("rejects reset attempted before the room is initialized", async () => {
+    const stub = getStub("test-room-reset-3");
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "anything" });
+    expect(res.status).toBe(409);
   });
 });
 ```
@@ -515,7 +554,7 @@ Expected: FAIL — `Cannot find module '../src/room.js'` (and/or the `ROOM` bind
 
 ```js
 import { countSetBits } from "./bits.js";
-import { isValidMode } from "./validation.js";
+import { isValidMode, isValidAdminSecret } from "./validation.js";
 
 const CHECKS_SEEN_LENGTH = 96;
 
@@ -542,21 +581,22 @@ export class RoomDO {
       return this.handleStatus();
     }
     if (path === "/admin/reset" && request.method === "POST") {
-      return this.handleReset();
+      return this.handleReset(request);
     }
     return jsonResponse({ error: "not found" }, 404);
   }
 
   async handleInit(request) {
     const body = await request.json().catch(() => null);
-    if (!body || !isValidMode(body.mode)) {
-      return jsonResponse({ error: "invalid mode" }, 400);
+    if (!body || !isValidMode(body.mode) || !isValidAdminSecret(body.adminSecret)) {
+      return jsonResponse({ error: "invalid mode or adminSecret" }, 400);
     }
     const existingMode = await this.state.storage.get("mode");
     if (existingMode) {
       return jsonResponse({ mode: existingMode, created: false });
     }
     await this.state.storage.put("mode", body.mode);
+    await this.state.storage.put("adminSecret", body.adminSecret);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     return jsonResponse({ mode: body.mode, created: true });
@@ -574,7 +614,16 @@ export class RoomDO {
     });
   }
 
-  async handleReset() {
+  async handleReset(request) {
+    const mode = await this.state.storage.get("mode");
+    if (!mode) {
+      return jsonResponse({ error: "room not initialized" }, 409);
+    }
+    const body = await request.json().catch(() => null);
+    const storedSecret = await this.state.storage.get("adminSecret");
+    if (!body || body.adminSecret !== storedSecret) {
+      return jsonResponse({ error: "invalid admin secret" }, 403);
+    }
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     return jsonResponse({ ok: true });
@@ -588,7 +637,7 @@ Run: `npm test` — expect all `room-admin.test.js` cases to pass.
 
 ```bash
 git add worker/src/room.js worker/test/room-admin.test.js
-git commit -m "Add RoomDO with admin init/status/reset endpoints"
+git commit -m "Add RoomDO with admin init/status/reset endpoints, reset gated by admin secret"
 ```
 
 ---
@@ -620,7 +669,7 @@ async function initRoom(stub, mode) {
   await stub.fetch("https://do/admin/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, adminSecret: "test-secret" }),
   });
 }
 
@@ -757,7 +806,7 @@ async function initRoom(stub, mode) {
   await stub.fetch("https://do/admin/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, adminSecret: "test-secret" }),
   });
 }
 
@@ -914,7 +963,7 @@ async function initRoom(stub, mode) {
   await stub.fetch("https://do/admin/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, adminSecret: "test-secret" }),
   });
 }
 
@@ -1060,7 +1109,7 @@ describe("Worker routing", () => {
     const initRes = await SELF.fetch("https://example.com/room/test-route-2/admin/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen+items" }),
+      body: JSON.stringify({ mode: "checksSeen+items", adminSecret: "test-secret" }),
     });
     expect(initRes.status).toBe(200);
     expect(initRes.headers.get("Access-Control-Allow-Origin")).toBe("*");
@@ -1084,7 +1133,7 @@ describe("Worker routing", () => {
     await SELF.fetch("https://example.com/room/test-route-3a/admin/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen" }),
+      body: JSON.stringify({ mode: "checksSeen", adminSecret: "test-secret" }),
     });
     const statusB = await SELF.fetch("https://example.com/room/test-route-3b/admin/status");
     const dataB = await statusB.json();
@@ -1095,7 +1144,7 @@ describe("Worker routing", () => {
     await SELF.fetch("https://example.com/room/test-route-4/admin/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen" }),
+      body: JSON.stringify({ mode: "checksSeen", adminSecret: "test-secret" }),
     });
     const res = await SELF.fetch("https://example.com/room/test-route-4/ws", {
       headers: { Upgrade: "websocket" },
@@ -1239,7 +1288,7 @@ Run: `npm run dev` (leave it running in one terminal)
 In another terminal, run these (adjust the port if `wrangler dev` printed a different one):
 
 ```bash
-curl -X POST http://127.0.0.1:8787/room/manual-test/admin/init -H "Content-Type: application/json" -d "{\"mode\":\"checksSeen+items\"}"
+curl -X POST http://127.0.0.1:8787/room/manual-test/admin/init -H "Content-Type: application/json" -d "{\"mode\":\"checksSeen+items\",\"adminSecret\":\"test-secret\"}"
 curl http://127.0.0.1:8787/room/manual-test/admin/status
 curl -X POST http://127.0.0.1:8787/room/manual-test/sync -H "Content-Type: application/json" -d "{\"checksSeen\":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}"
 ```
@@ -1258,7 +1307,7 @@ Expected: output ending with a line like `https://rmr-sync.append-rmr.workers.de
 Run (substituting your actual URL):
 
 ```bash
-curl -X POST https://rmr-sync.append-rmr.workers.dev/room/manual-test-2/admin/init -H "Content-Type: application/json" -d "{\"mode\":\"checksSeen\"}"
+curl -X POST https://rmr-sync.append-rmr.workers.dev/room/manual-test-2/admin/init -H "Content-Type: application/json" -d "{\"mode\":\"checksSeen\",\"adminSecret\":\"test-secret\"}"
 ```
 
 Expected: `{"mode":"checksSeen","created":true}`. If this fails with an SSL error, wait a few minutes (see the "Note on new subdomains" above) and retry — the same issue observed with the earlier throwaway test Worker doesn't recur for new deploys under an already-provisioned subdomain, but retry once if it does.
@@ -1280,6 +1329,8 @@ git commit -m "Add Worker self-hosting guide; real backend now deployed"
 **Interfaces:**
 - Consumes: the deployed Worker's `/room/{param}/admin/init`, `/admin/reset`, `/admin/status` endpoints (Tasks 3, 7, 8) via `fetch()`.
 - Produces: a standalone static page with no dependencies on any other file in this repo.
+
+**Important:** the admin secret field must stay off-screen if this page is ever used while streaming (unlike the room key, which is already visible on the SFC screen — see the spec's "Admin secret, separate from the room key" decision). It's rendered as a password-style input for basic shoulder-surf/screen-share protection, but that's not real security on its own — don't type it into view on a stream.
 
 - [ ] **Step 1: Create `admin/host_admin.html`**
 
@@ -1307,6 +1358,9 @@ git commit -m "Add Worker self-hosting guide; real backend now deployed"
 
 <label for="roomKey">Room key (Option string from spoiler.txt)</label>
 <input id="roomKey" placeholder="V204#X7#SV8d5m27k+p99XcvrXsSiYA#..." />
+
+<label for="adminSecret">Admin secret (yours alone — do not share, do not show on stream)</label>
+<input id="adminSecret" type="password" placeholder="choose a private password for this room" />
 
 <label for="mode">Share mode (used only when creating the room)</label>
 <select id="mode">
@@ -1342,7 +1396,10 @@ async function createRoom() {
     const res = await fetch(getRoomUrl("/admin/init"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: document.getElementById("mode").value }),
+      body: JSON.stringify({
+        mode: document.getElementById("mode").value,
+        adminSecret: document.getElementById("adminSecret").value,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1354,7 +1411,11 @@ async function createRoom() {
 
 async function resetRoom() {
   try {
-    const res = await fetch(getRoomUrl("/admin/reset"), { method: "POST" });
+    const res = await fetch(getRoomUrl("/admin/reset"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminSecret: document.getElementById("adminSecret").value }),
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     showStatus("Room reset.", false);
@@ -1394,15 +1455,18 @@ Open `admin/host_admin.html` directly in a browser (double-click it, or `file://
 
 1. Fill "Worker URL" with the URL from Task 8 (e.g. `https://rmr-sync.append-rmr.workers.dev`).
 2. Fill "Room key" with a test string, e.g. `manual-admin-test-1`.
-3. Leave mode as "checksSeen only" and click **Create Room**.
+3. Fill "Admin secret" with e.g. `test-secret-1`.
+4. Leave mode as "checksSeen only" and click **Create Room**.
    Expected: status box shows `Room mode: checksSeen (just created)`.
-4. Click **Create Room** again.
+5. Click **Create Room** again.
    Expected: status box shows `Room mode: checksSeen (already existed)`.
-5. Click **Refresh Status**.
+6. Click **Refresh Status**.
    Expected: status box shows `mode: checksSeen`, `checksSeen bits set: 0`, `event count: 0`, `connected trackers: 0`.
-6. Click **Reset Room**.
+7. Click **Reset Room**.
    Expected: status box shows `Room reset.`
-7. Change "Room key" to something nonexistent, e.g. `manual-admin-test-does-not-exist`, and click **Refresh Status**.
+8. Clear the "Admin secret" field (or change it to something wrong) and click **Reset Room** again.
+   Expected: status box shows `Reset failed: invalid admin secret`.
+9. Change "Room key" to something nonexistent, e.g. `manual-admin-test-does-not-exist`, and click **Refresh Status**.
    Expected: status box shows `mode: (not created yet)`.
 
 - [ ] **Step 3: Commit**
@@ -2171,7 +2235,7 @@ Expected: prints a JSON string like `{"mode":null,"checksSeenBitsSet":0,"eventCo
 - [ ] **Step 4: Test an actual POST call**
 
 ```lua
-print(comm.httpPost("http://127.0.0.1:8787/room/manual-comm-test/admin/init", "{\"mode\":\"checksSeen\"}"))
+print(comm.httpPost("http://127.0.0.1:8787/room/manual-comm-test/admin/init", "{\"mode\":\"checksSeen\",\"adminSecret\":\"test-secret\"}"))
 ```
 
 Expected: prints `{"mode":"checksSeen","created":true}` (or `created:false` if already created from Step 3's room). If this succeeds, Task 14 can proceed exactly as written. If it fails in any way, stop and report the exact behavior before writing `lua/http_client.lua` — do not guess at a fix.
