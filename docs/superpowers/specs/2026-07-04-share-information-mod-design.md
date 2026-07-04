@@ -16,31 +16,38 @@ Both features ship together in v1 since they share the same backend, session key
 
 ## Key decisions
 
-- **Room key**: `sessionSave.param`, the seed-unique string `boot.lua` already computes. No separate room code needed — the same seed automatically means the same room.
+- **Room key**: `sessionSave.param`, the seed-unique string `boot.lua` already computes (read from a fixed ROM address, so it's baked in at generation time — likely the same seed string the randomizer shows on-screen; pending a quick empirical check, see "Open items" below). No separate room code needed — the same seed automatically means the same room.
 - **Player identity**: a hand-edited local config file (`share_config.txt`), no in-game prompt.
-- **Share level** (`checksSeen` only vs. `checksSeen+items`): a single **per-room** setting, not per-player. Whoever runs the **host** role sets it when the room is created; everyone else inherits it.
-- **Host vs. client role**: one Lua script, config-driven (`role = host|client`). The host calls `/init` to create/set the room's mode; clients wait for the room to exist.
+- **Share level** (`checksSeen` only vs. `checksSeen+items`): a single **per-room** setting, not per-player, set once when the room is created.
+- **Host duties are separated from gameplay entirely.** There is no `role = host|client` branching in the Lua script — every player runs the *identical* companion script and config (only `player_name` differs). Room lifecycle — create room (set mode), reset (clear state for a re-run), view status (mode, connected count, event count) — is handled by a **separate admin webpage**, run by whoever is organizing the session, independent of BizHawk. This avoids exposing room-admin actions to players' game clients and means one player accidentally misconfiguring `role` can't disrupt the room.
 - **Backend**: Cloudflare Worker + **Durable Objects** (one DO instance per room/seed). A DO gives single-threaded consistency for the OR-merge (no lost updates from concurrent writes) and can hold live WebSocket connections for the browser tracker. Cloudflare's free plan includes a Durable Objects allowance (SQLite-backed), which should be sufficient at this scale — confirm current free-tier limits when setting up the Worker.
-- **Transport is asymmetric, because BizHawk Lua has no WebSocket client**:
+- **Transport differs per client type**, because BizHawk Lua has no WebSocket client and the admin page needs simple request/response:
   - Game-side (Lua) ↔ Worker: plain **HTTP** (`comm.httpPostAsync`/`httpGetAsync`), polled on a timer. This is a documented part of BizHawk's Lua `comm` API, but should be double-checked against the target BizHawk version during implementation since the ref scripts have never exercised it.
-  - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS (unlike fetch/XHR), so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed.
-- **Tracker hosting**: a static local HTML file (same pattern as the existing `index.html` displayer), opened with `?room=<param>` in the URL — no deploy pipeline for v1.
-- **`boot.lua` and the existing progress tracker stay untouched.** This mod is purely additive: a new companion Lua script, a new backend, and a new (separate) HTML tracker page for the event feed.
+  - Admin page ↔ Worker: plain **HTTP** `fetch()`. Unlike WebSocket, this *is* subject to CORS, so the Worker must respond with `Access-Control-Allow-Origin` (and handle the `OPTIONS` preflight a JSON POST triggers) on the admin and player endpoints alike — a small, well-understood addition, not an architectural blocker.
+  - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS, so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed.
+- **Tracker and admin page hosting**: static local HTML files (same pattern as the existing `index.html` displayer), opened directly — no deploy pipeline for v1.
+- **No auth token on admin endpoints for v1.** This mod targets a small trusted friend group, not a public/competitive race — anyone who knows the room key could technically call `/reset` directly, but in practice only the organizer opens the admin page. Flagging this as a known simplification rather than an oversight; worth revisiting if this ever supports larger or less-trusted groups.
+- **`boot.lua` and the existing progress tracker stay untouched.** This mod is purely additive: a new companion Lua script, a new backend, a new admin webpage, and a new (separate) HTML tracker page for the event feed.
 
 ## Architecture
 
 ```
-BizHawk (per player)                 Cloudflare                  Browser
+Admin (organizer, no BizHawk)        Cloudflare                  Browser (any player/viewer)
 ┌─────────────────┐                 ┌──────────────┐          ┌──────────────┐
-│ boot.lua         │  reads RAM      │ Worker        │          │ event feed   │
-│ (untouched)      │◄───────┐       │  routes to    │  WS      │ tracker.html │
-│                  │        │       │  Durable      │◄────────►│ ?room=<param>│
-│ share_info.lua   │────────┘       │  Object       │          └──────────────┘
-│ (new companion)  │  HTTP POST/GET │  (1 per room, │
-│ reads config.txt │────────────────►  keyed by     │
-└─────────────────┘  comm.http*     │  sessionSave  │
-                                     │  .param)      │
-                                     └──────────────┘
+│ host_admin.html  │  HTTP fetch()   │ Worker        │          │ event feed   │
+│ create/reset/    │────────────────►│  routes to    │  WS      │ tracker.html │
+│ status           │  (CORS-enabled) │  Durable      │◄────────►│ ?room=<param>│
+└─────────────────┘                 │  Object       │          └──────────────┘
+                                     │  (1 per room, │
+BizHawk (every player, identical)   │  keyed by     │
+┌─────────────────┐                 │  sessionSave  │
+│ boot.lua         │  reads RAM      │  .param)      │
+│ (untouched)      │◄───────┐       │               │
+│                  │        │       │               │
+│ share_info.lua   │────────┘       │               │
+│ (new companion)  │  HTTP POST/GET │               │
+│ reads config.txt │────────────────►               │
+└─────────────────┘  comm.http*     └──────────────┘
 ```
 
 ## Backend (Cloudflare Worker + Durable Object)
@@ -48,20 +55,31 @@ BizHawk (per player)                 Cloudflare                  Browser
 Per-room DO state: `mode` (`"checksSeen"` | `"checksSeen+items"`), `checksSeen` (96-byte merged OR state, covering X1/X2/X3 — same layout as `boot.lua`'s `addrChecksSeen` region), and a bounded event log (last ~200 pickups) so late-joining trackers can backfill history.
 
 Endpoints, all under `/room/{param}/...`:
-- `POST /init` — host-only; sets `mode` if not already set (idempotent no-op otherwise).
-- `POST /sync` — body: local `checksSeen` bytes → OR-merges into room state, responds with the fully merged bytes. Covers both push and pull in one round trip, mirroring `boot.lua`'s own `synchronize_or` pattern one level up (device → server → device).
+
+Admin (called by `host_admin.html`, needs CORS headers + `OPTIONS` preflight handling):
+- `POST /admin/init` — creates the room and sets `mode` if not already set (idempotent no-op otherwise).
+- `POST /admin/reset` — clears `checksSeen` and the event log (for starting a fresh run on the same room), keeps `mode`.
+- `GET /admin/status` — returns `mode`, a summary of `checksSeen`, event count, and connected WebSocket count.
+
+Player (called by `share_info.lua` via `comm.http*`, no browser/CORS involved):
+- `POST /sync` — body: local `checksSeen` bytes → OR-merges into room state, responds with the fully merged bytes. Covers both push and pull in one round trip, mirroring `boot.lua`'s own `synchronize_or` pattern one level up (device → server → device). Fails clearly if the room hasn't been created yet (host must run `/admin/init` first).
 - `POST /event` — body: `{player, game, items[]}` → appended to the log and broadcast to all connected WebSocket clients. Only accepted if `mode` includes items.
-- `GET /ws` (WebSocket upgrade) — browser tracker connects here; on connect the server sends `mode` + backlog, then streams new events live.
+
+Tracker (browser, WebSocket, no CORS applicable):
+- `GET /ws` (WebSocket upgrade) — connects here; on connect the server sends `mode` + backlog, then streams new events live.
 
 ## Companion Lua script (`lua/share_info.lua`)
 
-Loaded after `boot.lua`, following the same convention as the existing tracker script ("load this script after loading RMR boot.lua"). Reads `share_config.txt`: `player_name`, `role` (`host`/`client`), `worker_url`, and `share_mode` (host only).
+Loaded after `boot.lua`, following the same convention as the existing tracker script ("load this script after loading RMR boot.lua"). Every player runs the identical script and logic — only `share_config.txt`'s `player_name` differs between them. Config: `player_name`, `worker_url`. (`share_mode` is not part of player config — it's set once, room-wide, via the admin page.)
 
 Main loop, polled every few seconds (matching the existing tracker's `cWaitFrames`-style cadence):
-1. **Host**: if the room is not yet confirmed initialized, `POST /init`.
-2. **Client**: if the room is not yet confirmed to exist, poll and show a waiting message (via the existing `Text.out` helper) until the host's `/init` has landed.
-3. Read local `checksSeen` bytes from RAM, `POST /sync`, write the merged response back into RAM — the same OR fold-back style as `updateSaveValue`'s `synchronize_or` in `boot.lua`.
-4. If `share_mode` includes items: diff current vs. previous items snapshot (same acquired-item detection approach as `boot.lua`'s `acquiredItemInfo` / `RMR_progress_tracker.lua`'s diffing) and `POST /event` for newly-acquired items.
+1. If the room is not yet confirmed to exist (i.e. no admin has run `/admin/init` yet), poll and show a waiting message (via the existing `Text.out` helper) until it does.
+2. Read local `checksSeen` bytes from RAM, `POST /sync`, write the merged response back into RAM — the same OR fold-back style as `updateSaveValue`'s `synchronize_or` in `boot.lua`.
+3. If the room's `mode` (learned from the `/sync` response) includes items: diff current vs. previous items snapshot (same acquired-item detection approach as `boot.lua`'s `acquiredItemInfo` / `RMR_progress_tracker.lua`'s diffing) and `POST /event` for newly-acquired items.
+
+## Admin webpage (`admin/host_admin.html`)
+
+A static local HTML page the session organizer opens (not a player-facing tool, and doesn't require BizHawk at all). Fields to create a room: room key (the seed string — see "Open items" below) and share mode. Buttons for reset and a live status view (polls `/admin/status`). Talks to the Worker via plain `fetch()`.
 
 ## Event-feed tracker (`tracker/event_feed.html`)
 
@@ -76,10 +94,12 @@ share_information_mod/
 ├── .gitignore              # ignores /ref
 ├── README.md
 ├── lua/
-│   └── share_info.lua      # companion script
+│   └── share_info.lua      # companion script (identical for every player)
 ├── worker/                 # Cloudflare Worker + Durable Object source
 │   ├── src/index.js
 │   └── wrangler.toml
+├── admin/
+│   └── host_admin.html     # organizer-only room create/reset/status page
 ├── tracker/
 │   ├── event_feed.html
 │   └── event_feed.js
@@ -89,12 +109,20 @@ share_information_mod/
 
 ## Open items to verify during implementation
 
+- **Room key source**: confirm whether the on-screen seed string shown by the randomizer matches the `param` bytes embedded at `0xBFC400`/`0xCFC400` in the ROM (same value `boot.lua` reads via `getParamOnROM`). Quick check: while `boot.lua` is running, enter in BizHawk's Lua Console:
+  ```lua
+  local s="" for i=0,0x7F do local v=cpu[0xBFC400+i] if v==0 then break end s=s..string.char(v) end print(s)
+  ```
+  (use `0xCFC400` if the current title is X3) and compare to the displayed seed.
+  - If they match: the admin page just takes the seed string as manual input — no extra tooling.
+  - If they don't match: add a small helper (in the admin page or a standalone script) that reads the `param` bytes directly from the generated `.smc` file at the known offset.
 - Confirm `comm.httpPostAsync`/`httpGetAsync` (or equivalent) are actually available and reliable in the target BizHawk build/Faust core combination — the ref scripts have never used networking, so this is unverified against this specific setup.
 - Confirm current Cloudflare Durable Objects free-tier limits at time of deploy.
 
 ## Verification plan
 
-- **Worker/DO**: local `wrangler dev` testing of `/init`, `/sync` (OR-merge correctness with concurrent-ish requests), `/event`, and the WebSocket upgrade + broadcast path, before deploying.
-- **Lua script**: run two BizHawk instances (host + client) against the same seed, confirm `checksSeen` converges identically on both sides after visiting different scouted locations, and confirm `/init`'s idempotency (client joining before or after the host).
+- **Worker/DO**: local `wrangler dev` testing of `/admin/init`, `/admin/reset`, `/admin/status`, `/sync` (OR-merge correctness with concurrent-ish requests), `/event`, CORS preflight handling on admin endpoints, and the WebSocket upgrade + broadcast path, before deploying.
+- **Admin page**: create a room, confirm players' `/sync` calls fail clearly before creation and succeed after; confirm `/admin/reset` clears state without needing to touch any player's game.
+- **Lua script**: run two BizHawk instances (both running the identical script, different `player_name`) against the same seed, confirm `checksSeen` converges identically on both sides after visiting different scouted locations, and confirm they wait gracefully if the admin hasn't created the room yet.
 - **Tracker page**: open `event_feed.html?room=<param>` in a browser while both BizHawk instances play, confirm live event updates appear with correct icons in both display modes, and confirm a late-opened tracker backfills the existing log.
 - **End-to-end**: two players, same seed, real playthrough for ~15–20 minutes, checking for dropped events, RAM corruption from bad writes, and reasonable HTTP polling overhead.
