@@ -113,7 +113,7 @@ share_information_mod/
 ## Open items to verify during implementation
 
 - Confirm `comm.httpPostAsync`/`httpGetAsync` (or equivalent) are actually available and reliable in the target BizHawk build/Faust core combination — the ref scripts have never used networking, so this is unverified against this specific setup.
-- Confirm current Cloudflare Durable Objects free-tier limits at time of deploy.
+- ~~Confirm current Cloudflare Durable Objects free-tier limits at time of deploy.~~ **Confirmed working** via a real deploy (`worker/` — throwaway test Worker + Durable Object, `rmr-share-test.append-rmr.workers.dev`): free plan requires the **SQLite-backed** storage backend, i.e. `new_sqlite_classes` in the `[[migrations]]` block of `wrangler.toml`, not the older `new_classes` (which needs a paid plan). Storage persistence across requests verified directly (a counter incremented correctly over repeated calls). One practical gotcha hit along the way, worth remembering for any future account: after claiming/changing your `*.workers.dev` account subdomain, HTTPS to it can fail with `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` for a few minutes while Cloudflare provisions the certificate for the new subdomain — this resolves on its own; no action needed beyond waiting.
 
 ## Appendix: room-key verification
 
