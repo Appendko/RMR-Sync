@@ -16,7 +16,7 @@ Both features ship together in v1 since they share the same backend, session key
 
 ## Key decisions
 
-- **Room key**: `sessionSave.param`, the seed-unique string `boot.lua` already computes (read from a fixed ROM address, so it's baked in at generation time — likely the same seed string the randomizer shows on-screen; pending a quick empirical check, see "Open items" below). No separate room code needed — the same seed automatically means the same room.
+- **Room key**: the **Option string** (`sessionSave.param` in `boot.lua`'s terms) — confirmed by direct inspection of a generated seed pack to be the exact string printed under `***** Option/オプション *****` in the randomizer's `spoiler.txt`, and later mirrored into `save.txt` as `param="..."` once the game is first booted. Example: `V204#X7#SV8d5m27k+p99XcvrXsSiYA#sk#W1#T#ISB0#ISC#PEREREREREQ#MQAAIgEgA`. Since it's in `spoiler.txt` from the moment the seed is generated, the host can copy it straight from there — no need to boot the game, read ROM bytes, or wait for `save.txt` to exist. No separate room code needed — the same seed automatically means the same room.
 - **Player identity**: a hand-edited local config file (`share_config.txt`), no in-game prompt.
 - **Share level** (`checksSeen` only vs. `checksSeen+items`): a single **per-room** setting, not per-player, set once when the room is created.
 - **Host duties are separated from gameplay entirely.** There is no `role = host|client` branching in the Lua script — every player runs the *identical* companion script and config (only `player_name` differs). Room lifecycle — create room (set mode), reset (clear state for a re-run), view status (mode, connected count, event count) — is handled by a **separate admin webpage**, run by whoever is organizing the session, independent of BizHawk. This avoids exposing room-admin actions to players' game clients and means one player accidentally misconfiguring `role` can't disrupt the room.
@@ -79,7 +79,7 @@ Main loop, polled every few seconds (matching the existing tracker's `cWaitFrame
 
 ## Admin webpage (`admin/host_admin.html`)
 
-A static local HTML page the session organizer opens (not a player-facing tool, and doesn't require BizHawk at all). Fields to create a room: room key (the seed string — see "Open items" below) and share mode. Buttons for reset and a live status view (polls `/admin/status`). Talks to the Worker via plain `fetch()`.
+A static local HTML page the session organizer opens (not a player-facing tool, and doesn't require BizHawk at all). Fields to create a room: room key (the Option string, copy-pasted from `spoiler.txt`) and share mode. Buttons for reset and a live status view (polls `/admin/status`). Talks to the Worker via plain `fetch()`.
 
 ## Event-feed tracker (`tracker/event_feed.html`)
 
@@ -109,15 +109,20 @@ share_information_mod/
 
 ## Open items to verify during implementation
 
-- **Room key source**: confirm whether the on-screen seed string shown by the randomizer matches the `param` bytes embedded at `0xBFC400`/`0xCFC400` in the ROM (same value `boot.lua` reads via `getParamOnROM`). Quick check: while `boot.lua` is running, enter in BizHawk's Lua Console:
-  ```lua
-  local s="" for i=0,0x7F do local v=cpu[0xBFC400+i] if v==0 then break end s=s..string.char(v) end print(s)
-  ```
-  (use `0xCFC400` if the current title is X3) and compare to the displayed seed.
-  - If they match: the admin page just takes the seed string as manual input — no extra tooling.
-  - If they don't match: add a small helper (in the admin page or a standalone script) that reads the `param` bytes directly from the generated `.smc` file at the known offset.
 - Confirm `comm.httpPostAsync`/`httpGetAsync` (or equivalent) are actually available and reliable in the target BizHawk build/Faust core combination — the ref scripts have never used networking, so this is unverified against this specific setup.
 - Confirm current Cloudflare Durable Objects free-tier limits at time of deploy.
+
+## Appendix: room-key verification
+
+Confirmed by direct inspection of a generated seed pack (`spoiler.txt` / `save.txt`) that the Option string is identical to `boot.lua`'s `param` value, which is also readable live from ROM at a title-dependent address (`addrParamOnROM = {0xBFC400, 0xBFC400, 0xCFC400}` for X1/X2/X3 respectively — X1 and X2 share an address, X3 differs because of its different ROM bank layout). For reference, this is the dynamic read (title-aware, works for all three titles) used to cross-check it live in-game via BizHawk's Lua Console while `boot.lua` is running:
+```lua
+local addrParamOnROM = {0xBFC400,0xBFC400,0xCFC400}
+local function getTitle() local tmp = cpu[0x80FFC9] - 0x30 ; if tmp < 0 then tmp = 1 end ; return tmp end
+local title = getTitle()
+local s="" for i=0,0x7F do local v=cpu[addrParamOnROM[title]+i] if v==0 then break end s=s..string.char(v) end
+print(title, s)
+```
+This isn't needed for the mod itself — `spoiler.txt` is simpler and available before boot — but is kept here since it's how the room-key decision above was verified.
 
 ## Verification plan
 
