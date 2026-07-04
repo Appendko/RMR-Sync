@@ -27,6 +27,7 @@ Both features ship together in v1 since they share the same backend, session key
   - Admin page ↔ Worker: plain **HTTP** `fetch()`. Unlike WebSocket, this *is* subject to CORS, so the Worker must respond with `Access-Control-Allow-Origin` (and handle the `OPTIONS` preflight a JSON POST triggers) on the admin and player endpoints alike — a small, well-understood addition, not an architectural blocker.
   - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS, so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed.
 - **Tracker and admin page hosting**: static local HTML files (same pattern as the existing `index.html` displayer), opened directly — no deploy pipeline for v1.
+- **Hosting model: a default shared instance, but "bring your own backend" is fully supported.** Technically one Worker deployment can serve unlimited independent rooms — each room key (`param`) maps to its own isolated Durable Object instance via `idFromName`, so unrelated groups on different seeds never interact even on a shared Worker. Practically, a single publicly-shared instance risks exhausting Cloudflare's free-tier daily request cap if adoption grows, and makes one person's account a single point of failure for everyone. So: the maintainer hosts a default instance for convenience (zero-setup for casual users), but `worker_url` remains a plain config value in both `share_config.txt` and the admin page — any group can deploy their own Worker (see `worker/README.md`) and point their own config at it, with no code changes needed. This matters in particular because the default instance is not guaranteed to stay up long-term (the maintainer may repurpose their Cloudflare account later).
 - **No auth token on admin endpoints for v1.** This mod targets a small trusted friend group, not a public/competitive race — anyone who knows the room key could technically call `/reset` directly, but in practice only the organizer opens the admin page. Flagging this as a known simplification rather than an oversight; worth revisiting if this ever supports larger or less-trusted groups.
 - **`boot.lua` and the existing progress tracker stay untouched.** This mod is purely additive: a new companion Lua script, a new backend, a new admin webpage, and a new (separate) HTML tracker page for the event feed.
 
@@ -98,7 +99,8 @@ share_information_mod/
 │   └── share_info.lua      # companion script (identical for every player)
 ├── worker/                 # Cloudflare Worker + Durable Object source
 │   ├── src/index.js
-│   └── wrangler.toml
+│   ├── wrangler.toml
+│   └── README.md           # self-hosting/deploy guide (wrangler login/deploy)
 ├── admin/
 │   └── host_admin.html     # organizer-only room create/reset/status page
 ├── tracker/
