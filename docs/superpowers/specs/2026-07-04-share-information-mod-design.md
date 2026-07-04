@@ -6,6 +6,7 @@ RouteMatriX Randomizer (RMR) combines Mega Man X1–X3 into a single randomizer.
 
 - **`ref/multiworld/`** — Lua scripts (BizHawk + Faust SNES core) implementing a *local, single-player* "multiworld": one person plays X1/X2/X3 in one session, switching ROMs, with certain item categories (life-ups, sub-tanks, armor, etc.) merged across titles via a shared save file (`boot.lua`).
 - **`ref/RMR_progress_tracker_displayer_ver_js_20260126/`** — A companion Lua script that reads game memory (items, checks, deaths, clear status, current title) and writes it to a local JS file, which a local HTML page reads to render a visual progress tracker using purpose-built icon assets (per-game, per-boss, per-weapon).
+- **`ref/aaa/`** — A real generated seed pack (ROMs, `boot.lua`, `spoiler.txt`, `save.txt`, savestates), kept as a concrete reference example. It's what confirmed the room-key format used below (see "Appendix: room-key verification").
 
 Both are local-only: everything happens on one machine, for one player. **`share_information_mod`** is a new, standalone companion mod that extends this to *multiple real players on separate machines, playing the same seed*, who want to:
 
