@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RMR Sync — Room Admin</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  label { display: block; margin-top: 1rem; font-weight: bold; }
+  input, select { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+  button { margin-top: 1rem; margin-right: 0.5rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+  #status { margin-top: 1.5rem; white-space: pre-wrap; background: #f0f0f0; padding: 1rem; border-radius: 4px; }
+  .error { color: #b00020; }
+</style>
+</head>
+<body>
+<h1>RMR Sync — Room Admin</h1>
+
+<label for="workerUrl">Worker URL</label>
+<input id="workerUrl" placeholder="https://rmr-sync.yourname.workers.dev" />
+
+<label for="roomKey">Room key (Option string from spoiler.txt)</label>
+<input id="roomKey" placeholder="V204#X7#SV8d5m27k+p99XcvrXsSiYA#..." />
+
+<label for="adminSecret">Admin secret (yours alone — do not share, do not show on stream)</label>
+<input id="adminSecret" type="password" placeholder="choose a private password for this room" />
+
+<label for="mode">Share mode (used only when creating the room)</label>
+<select id="mode">
+  <option value="checksSeen">checksSeen only</option>
+  <option value="checksSeen+items">checksSeen + items</option>
+</select>
+
+<button id="createBtn">Create Room</button>
+<button id="resetBtn">Reset Room</button>
+<button id="refreshBtn">Refresh Status</button>
+
+<div id="status">No status yet.</div>
+
+<script>
+function getBaseUrl() {
+  return document.getElementById("workerUrl").value.trim().replace(/\/$/, "");
+}
+
+function getRoomUrl(path) {
+  const base = getBaseUrl();
+  const room = encodeURIComponent(document.getElementById("roomKey").value.trim());
+  return `${base}/room/${room}${path}`;
+}
+
+function showStatus(text, isError) {
+  const el = document.getElementById("status");
+  el.textContent = text;
+  el.className = isError ? "error" : "";
+}
+
+async function createRoom() {
+  try {
+    const res = await fetch(getRoomUrl("/admin/init"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: document.getElementById("mode").value,
+        adminSecret: document.getElementById("adminSecret").value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    showStatus(`Room mode: ${data.mode}${data.created ? " (just created)" : " (already existed)"}`, false);
+  } catch (err) {
+    showStatus(`Create failed: ${err.message}`, true);
+  }
+}
+
+async function resetRoom() {
+  try {
+    const res = await fetch(getRoomUrl("/admin/reset"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminSecret: document.getElementById("adminSecret").value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    showStatus("Room reset.", false);
+  } catch (err) {
+    showStatus(`Reset failed: ${err.message}`, true);
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetch(getRoomUrl("/admin/status"));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    showStatus(
+      `mode: ${data.mode ?? "(not created yet)"}\n` +
+      `checksSeen bits set: ${data.checksSeenBitsSet}\n` +
+      `event count: ${data.eventCount}\n` +
+      `connected trackers: ${data.connected}`,
+      false
+    );
+  } catch (err) {
+    showStatus(`Status check failed: ${err.message}`, true);
+  }
+}
+
+document.getElementById("createBtn").addEventListener("click", createRoom);
+document.getElementById("resetBtn").addEventListener("click", resetRoom);
+document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
+</script>
+</body>
+</html>
