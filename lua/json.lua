@@ -70,6 +70,27 @@ local function skipWhitespace(str, pos)
     return e + 1
 end
 
+-- Encodes a Unicode codepoint (as decoded from a \uXXXX escape) into UTF-8
+-- bytes. Uses plain arithmetic (no bitwise operators) since BizHawk's Lua
+-- environment does not support native bitwise operators (the existing
+-- ref/ scripts polyfill a `bit` table for that reason), so this stays
+-- portable across Lua 5.1-5.4. Surrogate pairs (codepoints above 0xFFFF,
+-- which need two combined \uXXXX escapes) are out of scope.
+local function utf8Encode(codepoint)
+    if codepoint <= 0x7F then
+        return string.char(codepoint)
+    elseif codepoint <= 0x7FF then
+        local b1 = 0xC0 + math.floor(codepoint / 0x40)
+        local b2 = 0x80 + (codepoint % 0x40)
+        return string.char(b1, b2)
+    else
+        local b1 = 0xE0 + math.floor(codepoint / 0x1000)
+        local b2 = 0x80 + (math.floor(codepoint / 0x40) % 0x40)
+        local b3 = 0x80 + (codepoint % 0x40)
+        return string.char(b1, b2, b3)
+    end
+end
+
 local function decodeString(str, pos)
     assert(str:sub(pos, pos) == '"', "expected string")
     local out = {}
@@ -81,9 +102,17 @@ local function decodeString(str, pos)
             return table.concat(out), i + 1
         elseif c == "\\" then
             local nextC = str:sub(i + 1, i + 1)
-            local escapes = { n = "\n", t = "\t", r = "\r", ['"'] = '"', ["\\"] = "\\", ["/"] = "/" }
-            out[#out + 1] = escapes[nextC] or nextC
-            i = i + 2
+            if nextC == "u" then
+                local hex = str:sub(i + 2, i + 5)
+                local codepoint = tonumber(hex, 16)
+                if not codepoint then error("invalid \\u escape at position " .. i) end
+                out[#out + 1] = utf8Encode(codepoint)
+                i = i + 6
+            else
+                local escapes = { n = "\n", t = "\t", r = "\r", ['"'] = '"', ["\\"] = "\\", ["/"] = "/" }
+                out[#out + 1] = escapes[nextC] or nextC
+                i = i + 2
+            end
         else
             out[#out + 1] = c
             i = i + 1
@@ -93,6 +122,9 @@ end
 
 local function decodeNumber(str, pos)
     local s, e = str:find("^%-?%d+%.?%d*[eE]?[%+%-]?%d*", pos)
+    if not s then
+        error("invalid JSON value at position " .. pos)
+    end
     return tonumber(str:sub(s, e)), e + 1
 end
 
@@ -149,6 +181,8 @@ decodeValue = function(str, pos)
         return false, i + 5
     elseif str:sub(i, i + 3) == "null" then
         return nil, i + 4
+    elseif c == "" or not (c == "-" or c:match("%d")) then
+        error("invalid JSON value at position " .. i)
     else
         return decodeNumber(str, i)
     end
