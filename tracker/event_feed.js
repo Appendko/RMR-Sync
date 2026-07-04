@@ -42,6 +42,16 @@ function main() {
   const connectionState = document.getElementById("connectionState");
   const log = document.getElementById("log");
   const showTextCheckbox = document.getElementById("showText");
+  const allEvents = [];
+
+  function renderAll() {
+    log.innerHTML = "";
+    for (const event of allEvents) {
+      log.appendChild(renderEntry(event, showTextCheckbox.checked));
+    }
+  }
+
+  showTextCheckbox.addEventListener("input", renderAll);
 
   if (!room) {
     connectionState.textContent = "no ?room=<key> in URL";
@@ -69,10 +79,10 @@ function main() {
     const data = JSON.parse(message.data);
     if (data.type === "init") {
       connectionState.textContent = `connected to room ${room} (mode: ${data.mode ?? "not created yet"})`;
-      for (const event of data.backlog) {
-        log.appendChild(renderEntry(event, showTextCheckbox.checked));
-      }
+      allEvents.push(...data.backlog);
+      renderAll();
     } else if (data.type === "event") {
+      allEvents.push(data.event);
       log.appendChild(renderEntry(data.event, showTextCheckbox.checked));
       log.scrollTop = log.scrollHeight;
     }
