@@ -17,6 +17,8 @@
 - Event log is capped at the 200 most recent entries.
 - Valid room `mode` values are exactly `"checksSeen"` and `"checksSeen+items"` — no other strings.
 - The room key (URL path segment) is **not** a secret — it's shown on-screen in-game, visible to stream viewers. It must never gate a destructive action. `POST /admin/reset` requires a separate `adminSecret`, chosen by the organizer at room creation and never returned by any endpoint (including `/admin/status`). `POST /admin/init` requires `adminSecret` too (stored on first creation; ignored on subsequent idempotent calls, since nothing is mutated then).
+- `/admin/reset` increments a `resetEpoch` counter (storage key `"resetEpoch"`; wire field name `epoch` on `/sync` requests/responses — the two names are intentionally distinct: one is DO storage, the other is the public contract). `/sync` discards (does not merge) a client's `checksSeen` contribution if its reported `epoch` is behind the room's current `resetEpoch` — this is what makes reset actually stick against a still-playing client's cached local state. See Task 4's design note.
+- Every request that mutates room state (`/admin/init`, `/admin/reset`, `/sync`, `/event`) calls `scheduleExpiry()`, which reschedules a 24h Durable Object Alarm. When it fires (`alarm()`), the room's entire storage is wiped — a sliding inactivity window, not a fixed cutoff from creation. There's no other TTL mechanism for Durable Object storage; without this, rooms would persist forever.
 - CORS: every non-WebSocket Worker response gets `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type`; `OPTIONS` requests get a 204 with those headers and no body.
 - Node.js v24 and Wrangler (via `npx wrangler`) are already installed and authenticated in `worker/` (done earlier in this session — `npx wrangler whoami` should show a logged-in account). Do not re-run `wrangler login` unless it reports being logged out.
 - `worker/wrangler.toml` currently still has the throwaway test config (`name = "rmr-share-test"`, binding `TEST_DO`/class `TestDO`) — Task 1 replaces it with the real one. The throwaway Worker was already deleted from Cloudflare (`wrangler delete`), so there's no conflicting deployment.
@@ -138,7 +140,7 @@ git commit -m "Scaffold real Worker project with vitest-pool-workers test harnes
 
 **Interfaces:**
 - Produces: `orMergeBytes(a: number[], b: number[]): number[]`, `countSetBits(bytes: number[]): number`
-- Produces: `isValidMode(mode: any): boolean`, `isValidChecksSeenArray(arr: any): boolean`, `validateEventBody(body: any): string | null` (returns an error message, or `null` if valid), `isValidAdminSecret(secret: any): boolean` (non-empty string, up to 100 characters — used both when a room is created and when authorizing `/admin/reset`, see Task 3)
+- Produces: `isValidMode(mode: any): boolean`, `isValidChecksSeenArray(arr: any): boolean`, `validateEventBody(body: any): string | null` (returns an error message, or `null` if valid), `isValidAdminSecret(secret: any): boolean` (non-empty string, up to 100 characters — used both when a room is created and when authorizing `/admin/reset`, see Task 3), `isValidEpoch(value: any): boolean` (non-negative integer — used by `/sync`'s stale-client rejection, see Task 4)
 - Produces: `withCors(response: Response): Response`, `handleOptions(): Response`
 
 - [ ] **Step 1: Write failing tests for `bits.js`**
@@ -217,7 +219,7 @@ Create `worker/test/validation.test.js`:
 
 ```js
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret, isValidEpoch } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the two known modes", () => {
@@ -310,6 +312,20 @@ describe("isValidAdminSecret", () => {
     expect(isValidAdminSecret(123)).toBe(false);
   });
 });
+
+describe("isValidEpoch", () => {
+  it("accepts zero and positive integers", () => {
+    expect(isValidEpoch(0)).toBe(true);
+    expect(isValidEpoch(42)).toBe(true);
+  });
+
+  it("rejects negative numbers, non-integers, and non-numbers", () => {
+    expect(isValidEpoch(-1)).toBe(false);
+    expect(isValidEpoch(1.5)).toBe(false);
+    expect(isValidEpoch("0")).toBe(false);
+    expect(isValidEpoch(undefined)).toBe(false);
+  });
+});
 ```
 
 - [ ] **Step 6: Run it and confirm it fails**
@@ -354,6 +370,10 @@ export function validateEventBody(body) {
 export function isValidAdminSecret(secret) {
   return typeof secret === "string" && secret.length > 0 && secret.length <= 100;
 }
+
+export function isValidEpoch(value) {
+  return Number.isInteger(value) && value >= 0;
+}
 ```
 
 Item IDs are raw numeric bit-offsets (0-767, covering the 96-byte/768-bit items array across X1/X2/X3 — see Task 15), not display strings. Resolving an ID to an icon and a human-readable label is entirely the tracker's job (Task 10/11), using the same `RMR_progress_tracker_id_maps.js` data the original progress tracker uses — the Worker never needs to know what an ID "means."
@@ -362,7 +382,7 @@ Item IDs are raw numeric bit-offsets (0-767, covering the 96-byte/768-bit items 
 
 ```bash
 git add worker/src/validation.js worker/test/validation.test.js
-git commit -m "Add input validation helpers for mode/checksSeen/event/admin-secret bodies"
+git commit -m "Add input validation helpers for mode/checksSeen/event/admin-secret/epoch bodies"
 ```
 
 - [ ] **Step 9: Write failing tests for `cors.js`**
@@ -446,9 +466,11 @@ git commit -m "Add CORS response helpers"
 
 **Interfaces:**
 - Consumes: `countSetBits` from `worker/src/bits.js` (Task 2), `isValidMode`/`isValidAdminSecret` from `worker/src/validation.js` (Task 2)
-- Produces: `export class RoomDO` with a `fetch(request: Request): Promise<Response>` method, routing `POST /admin/init`, `GET /admin/status`, `POST /admin/reset` (more routes added in later tasks). DO storage keys used: `"mode"` (string), `"adminSecret"` (string, set once at creation, never exposed by `/admin/status`), `"checksSeen"` (96-length number array), `"events"` (array, empty until Task 5).
+- Produces: `export class RoomDO` with a `fetch(request: Request): Promise<Response>` method, routing `POST /admin/init`, `GET /admin/status`, `POST /admin/reset` (more routes added in later tasks), plus an `alarm()` handler and a `scheduleExpiry()` method (called by every room-state-mutating handler, including ones added in Tasks 4-5) that reschedules a 24h-inactivity alarm. DO storage keys used: `"mode"` (string), `"adminSecret"` (string, set once at creation, never exposed by `/admin/status`), `"resetEpoch"` (integer, starts at 0, incremented on every reset — also never exposed by `/admin/status`; becomes observable via `/sync`'s response once Task 4 implements it), `"checksSeen"` (96-length number array), `"events"` (array, empty until Task 5).
 
 **Design note — admin secret vs. room key.** The room key (the URL segment, e.g. `/room/<option-string>/...`) is not a secret in practice — it's shown on-screen in-game, so anyone watching a stream sees it. `POST /admin/reset` is destructive, so it can't be authorized by something that public. The organizer picks a separate `adminSecret` when creating the room; it's required on every `/admin/reset` call afterward and is never returned by any endpoint (including `/admin/status`).
+
+**Design note — auto-expiry.** Durable Object storage otherwise persists forever; there's no built-in TTL. `scheduleExpiry()` uses a Durable Object Alarm (`state.storage.setAlarm`) to wipe the room after 24h of no activity — a sliding window, rescheduled on every request that touches state, not a fixed cutoff from creation.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -456,7 +478,7 @@ Create `worker/test/room-admin.test.js`:
 
 ```js
 import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
+import { env, runDurableObjectAlarm } from "cloudflare:test";
 
 function getStub(roomName) {
   const id = env.ROOM.idFromName(roomName);
@@ -543,7 +565,26 @@ describe("RoomDO admin lifecycle", () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe("RoomDO auto-expiry", () => {
+  it("schedules an alarm on room creation, and wipes storage when it fires", async () => {
+    const id = env.ROOM.idFromName("test-room-expiry-1");
+    const stub = env.ROOM.get(id);
+    await postJson(stub, "/admin/init", { mode: "checksSeen+items", adminSecret: "s3cr3t" });
+
+    const before = await stub.fetch("https://do/admin/status");
+    expect((await before.json()).mode).toBe("checksSeen+items");
+
+    const ran = await runDurableObjectAlarm(stub);
+    expect(ran).toBe(true);
+
+    const after = await stub.fetch("https://do/admin/status");
+    expect(await after.json()).toEqual({ mode: null, checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
+  });
+});
 ```
+
+**Note on `runDurableObjectAlarm`:** this is `@cloudflare/vitest-pool-workers`'s documented test helper for forcing a Durable Object's pending alarm to fire immediately instead of waiting for real time to pass. If this specific import fails (package version mismatch), check that package's actual exports from `cloudflare:test` and adjust the import — the rest of the test's logic (create room, force the alarm, confirm storage is wiped) stays the same regardless of the exact helper name.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
@@ -557,6 +598,7 @@ import { countSetBits } from "./bits.js";
 import { isValidMode, isValidAdminSecret } from "./validation.js";
 
 const CHECKS_SEEN_LENGTH = 96;
+const EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -586,6 +628,15 @@ export class RoomDO {
     return jsonResponse({ error: "not found" }, 404);
   }
 
+  async scheduleExpiry() {
+    await this.state.storage.setAlarm(Date.now() + EXPIRY_MS);
+  }
+
+  async alarm() {
+    await this.state.storage.deleteAll();
+    this.sockets.clear();
+  }
+
   async handleInit(request) {
     const body = await request.json().catch(() => null);
     if (!body || !isValidMode(body.mode) || !isValidAdminSecret(body.adminSecret)) {
@@ -597,8 +648,10 @@ export class RoomDO {
     }
     await this.state.storage.put("mode", body.mode);
     await this.state.storage.put("adminSecret", body.adminSecret);
+    await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
+    await this.scheduleExpiry();
     return jsonResponse({ mode: body.mode, created: true });
   }
 
@@ -624,8 +677,11 @@ export class RoomDO {
     if (!body || body.adminSecret !== storedSecret) {
       return jsonResponse({ error: "invalid admin secret" }, 403);
     }
+    const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
+    await this.state.storage.put("resetEpoch", currentEpoch + 1);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
+    await this.scheduleExpiry();
     return jsonResponse({ ok: true });
   }
 }
@@ -637,7 +693,7 @@ Run: `npm test` — expect all `room-admin.test.js` cases to pass.
 
 ```bash
 git add worker/src/room.js worker/test/room-admin.test.js
-git commit -m "Add RoomDO with admin init/status/reset endpoints, reset gated by admin secret"
+git commit -m "Add RoomDO with admin init/status/reset endpoints, reset epoch, and 24h auto-expiry alarm"
 ```
 
 ---
@@ -649,8 +705,10 @@ git commit -m "Add RoomDO with admin init/status/reset endpoints, reset gated by
 - Create: `worker/test/room-sync.test.js`
 
 **Interfaces:**
-- Consumes: `orMergeBytes` from `worker/src/bits.js` (Task 2), `isValidChecksSeenArray` from `worker/src/validation.js` (Task 2), `RoomDO` from Task 3
-- Produces: `POST /sync` route on `RoomDO`, contract `{checksSeen: number[96]} -> {mode, checksSeen: number[96]}` (200), or `{error}` (409 if uninitialized, 400 if malformed).
+- Consumes: `orMergeBytes` from `worker/src/bits.js` (Task 2), `isValidChecksSeenArray`/`isValidEpoch` from `worker/src/validation.js` (Task 2), `RoomDO` from Task 3
+- Produces: `POST /sync` route on `RoomDO`, contract `{checksSeen: number[96], epoch: number} -> {mode, checksSeen: number[96], epoch: number}` (200), or `{error}` (409 if uninitialized, 400 if malformed). If the request's `epoch` is behind the room's current `resetEpoch`, the client's `checksSeen` is **not** merged in — the response still carries the room's actual current state and epoch so the client can catch up.
+
+**Design note — why stale syncs are rejected, not merged.** This is what makes `/admin/reset` (Task 3) actually stick. Without this check, a player who kept playing through a reset would re-upload their own already-known bits on their very next sync and silently undo it, since the merge is a one-way OR (see the spec's "Reset uses an epoch counter" decision).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -673,54 +731,87 @@ async function initRoom(stub, mode) {
   });
 }
 
+function sync(stub, checksSeen, epoch) {
+  return stub.fetch("https://do/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checksSeen, epoch }),
+  });
+}
+
 describe("RoomDO /sync", () => {
   it("rejects sync before the room is initialized", async () => {
     const stub = getStub("test-room-sync-1");
-    const res = await stub.fetch("https://do/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0) }),
-    });
+    const res = await sync(stub, new Array(96).fill(0), 0);
     expect(res.status).toBe(409);
   });
 
-  it("OR-merges checksSeen across multiple sync calls", async () => {
+  it("OR-merges checksSeen across multiple sync calls at the current epoch", async () => {
     const stub = getStub("test-room-sync-2");
     await initRoom(stub, "checksSeen");
 
     const playerA = new Array(96).fill(0);
     playerA[0] = 0b0001;
-    const resA = await stub.fetch("https://do/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: playerA }),
-    });
+    const resA = await sync(stub, playerA, 0);
     expect((await resA.json()).checksSeen[0]).toBe(0b0001);
 
     const playerB = new Array(96).fill(0);
     playerB[0] = 0b0010;
-    const resB = await stub.fetch("https://do/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: playerB }),
-    });
+    const resB = await sync(stub, playerB, 0);
     expect((await resB.json()).checksSeen[0]).toBe(0b0011);
 
-    const resC = await stub.fetch("https://do/sync", {
+    const resC = await sync(stub, new Array(96).fill(0), 0);
+    expect((await resC.json()).checksSeen[0]).toBe(0b0011);
+  });
+
+  it("returns the current epoch alongside the merged state", async () => {
+    const stub = getStub("test-room-sync-4");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0);
+    expect((await res.json()).epoch).toBe(0);
+  });
+
+  it("discards a stale client's contribution instead of merging it, but returns current state", async () => {
+    const stub = getStub("test-room-sync-5");
+    await initRoom(stub, "checksSeen");
+
+    const fresh = new Array(96).fill(0);
+    fresh[0] = 0b0001;
+    await sync(stub, fresh, 0);
+
+    await stub.fetch("https://do/admin/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0) }),
+      body: JSON.stringify({ adminSecret: "test-secret" }),
     });
-    expect((await resC.json()).checksSeen[0]).toBe(0b0011);
+
+    const staleContribution = new Array(96).fill(0);
+    staleContribution[0] = 0b0001; // this player's own already-known bit, from before the reset
+    const res = await sync(stub, staleContribution, 0); // still reporting epoch 0, the pre-reset epoch
+
+    const data = await res.json();
+    expect(data.epoch).toBe(1); // room moved on to epoch 1
+    expect(data.checksSeen[0]).toBe(0); // the stale contribution was NOT merged in
+
+    // A second sync at the now-current epoch behaves normally again.
+    const res2 = await sync(stub, new Array(96).fill(0), 1);
+    expect((await res2.json()).checksSeen[0]).toBe(0);
   });
 
   it("rejects a checksSeen array of the wrong length", async () => {
     const stub = getStub("test-room-sync-3");
     await initRoom(stub, "checksSeen");
+    const res = await sync(stub, [0, 1, 2], 0);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a missing or invalid epoch", async () => {
+    const stub = getStub("test-room-sync-6");
+    await initRoom(stub, "checksSeen");
     const res = await stub.fetch("https://do/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: [0, 1, 2] }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0) }),
     });
     expect(res.status).toBe(400);
   });
@@ -738,7 +829,7 @@ Update the imports at the top of `worker/src/room.js`:
 
 ```js
 import { orMergeBytes, countSetBits } from "./bits.js";
-import { isValidMode, isValidChecksSeenArray } from "./validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidEpoch } from "./validation.js";
 ```
 
 Add a branch in `fetch()`, right after the `/admin/reset` branch:
@@ -758,13 +849,19 @@ Add the handler method to the class:
       return jsonResponse({ error: "room not initialized" }, 409);
     }
     const body = await request.json().catch(() => null);
-    if (!body || !isValidChecksSeenArray(body.checksSeen)) {
-      return jsonResponse({ error: "invalid checksSeen" }, 400);
+    if (!body || !isValidChecksSeenArray(body.checksSeen) || !isValidEpoch(body.epoch)) {
+      return jsonResponse({ error: "invalid checksSeen or epoch" }, 400);
     }
+    const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
     const stored = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
-    const merged = orMergeBytes(stored, body.checksSeen);
-    await this.state.storage.put("checksSeen", merged);
-    return jsonResponse({ mode, checksSeen: merged });
+
+    let merged = stored;
+    if (body.epoch >= currentEpoch) {
+      merged = orMergeBytes(stored, body.checksSeen);
+      await this.state.storage.put("checksSeen", merged);
+    }
+    await this.scheduleExpiry();
+    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch });
   }
 ```
 
@@ -774,7 +871,7 @@ Run: `npm test` — expect all `room-sync.test.js` cases (and all earlier suites
 
 ```bash
 git add worker/src/room.js worker/test/room-sync.test.js
-git commit -m "Add RoomDO /sync endpoint with checksSeen OR-merge"
+git commit -m "Add RoomDO /sync endpoint with epoch-aware checksSeen OR-merge"
 ```
 
 ---
@@ -786,8 +883,8 @@ git commit -m "Add RoomDO /sync endpoint with checksSeen OR-merge"
 - Create: `worker/test/room-event.test.js`
 
 **Interfaces:**
-- Consumes: `validateEventBody` from `worker/src/validation.js` (Task 2)
-- Produces: `POST /event` route, contract `{player: string, game: 1|2|3, items: string[]} -> {ok: true}` (200), `{error}` (409 uninitialized, 403 mode is checksSeen-only, 400 malformed). Stored events capped at 200 (oldest dropped first). `broadcast(message)` method added for later use by Task 6 (no subscribers yet, so it's a no-op today).
+- Consumes: `validateEventBody` from `worker/src/validation.js` (Task 2), `scheduleExpiry()` from `RoomDO` (Task 3)
+- Produces: `POST /event` route, contract `{player: string, game: 1|2|3, items: number[]} -> {ok: true}` (200), `{error}` (409 uninitialized, 403 mode is checksSeen-only, 400 malformed). Stored events capped at 200 (oldest dropped first). `broadcast(message)` method added for later use by Task 6 (no subscribers yet, so it's a no-op today).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -872,7 +969,7 @@ Expected: FAIL — `/event` returns 404 (route not implemented yet).
 Update the import line to add `validateEventBody`:
 
 ```js
-import { isValidMode, isValidChecksSeenArray, validateEventBody } from "./validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidEpoch, validateEventBody } from "./validation.js";
 ```
 
 Add a constant near the top (below `CHECKS_SEEN_LENGTH`):
@@ -910,6 +1007,7 @@ Add these methods to the class:
     events.push(event);
     const trimmed = events.slice(-MAX_EVENTS);
     await this.state.storage.put("events", trimmed);
+    await this.scheduleExpiry();
     this.broadcast({ type: "event", event });
     return jsonResponse({ ok: true });
   }
@@ -1117,7 +1215,7 @@ describe("Worker routing", () => {
     const syncRes = await SELF.fetch("https://example.com/room/test-route-2/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0) }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), epoch: 0 }),
     });
     expect(syncRes.status).toBe(200);
 
@@ -1290,10 +1388,10 @@ In another terminal, run these (adjust the port if `wrangler dev` printed a diff
 ```bash
 curl -X POST http://127.0.0.1:8787/room/manual-test/admin/init -H "Content-Type: application/json" -d "{\"mode\":\"checksSeen+items\",\"adminSecret\":\"test-secret\"}"
 curl http://127.0.0.1:8787/room/manual-test/admin/status
-curl -X POST http://127.0.0.1:8787/room/manual-test/sync -H "Content-Type: application/json" -d "{\"checksSeen\":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}"
+curl -X POST http://127.0.0.1:8787/room/manual-test/sync -H "Content-Type: application/json" -d "{\"checksSeen\":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"epoch\":0}"
 ```
 
-Expected: first call returns `{"mode":"checksSeen+items","created":true}`; second returns `checksSeenBitsSet: 0, eventCount: 0`; third returns the merged array with a `1` in the first position.
+Expected: first call returns `{"mode":"checksSeen+items","created":true}`; second returns `checksSeenBitsSet: 0, eventCount: 0`; third returns the merged array with a `1` in the first position, plus `"epoch":0`.
 
 Stop the dev server (Ctrl+C) once confirmed.
 
@@ -2286,7 +2384,7 @@ Using the same room as Task 13:
 package.path = package.path..";lua\\?.lua"
 require "http_client"
 
-local result, err = Http.postJson("http://127.0.0.1:8787/room/manual-comm-test/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)() })
+local result, err = Http.postJson("http://127.0.0.1:8787/room/manual-comm-test/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)(), epoch = 0 })
 print(err)
 print(result and result.mode)
 ```
@@ -2294,7 +2392,7 @@ print(result and result.mode)
 Expected: `err` prints as `nil`, `result.mode` prints as `checksSeen` (the mode set in Task 13). Then test the error path with a nonexistent room:
 
 ```lua
-local result2, err2 = Http.postJson("http://127.0.0.1:8787/room/does-not-exist-yet/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)() })
+local result2, err2 = Http.postJson("http://127.0.0.1:8787/room/does-not-exist-yet/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)(), epoch = 0 })
 print(err2)
 print(result2 and result2.error)
 ```
@@ -2322,6 +2420,8 @@ git commit -m "Add Lua HTTP client wrapper over comm.httpGet/httpPost"
 - Produces: `ShareConfig.load(filename): (table|nil, string|nil)`; the running `share_info.lua` script itself (no other file depends on it — it's the top-level entry point players load in BizHawk).
 
 **Note:** `share_info.lua` does **not** use `itemName` (from `ref/multiworld/lua/itemName.lua`) at all — see Task 10's design note. It sends raw numeric item IDs to `/event`; the tracker (Task 10/11) is solely responsible for turning an ID into a label or icon.
+
+**Note on epoch tracking:** `share_info.lua` never calls `/admin/reset` itself, but it does react to a reset happening. It keeps a local `knownEpoch`, sent with every `/sync` call. When the server's response reports a newer epoch than it knew about, it overwrites its local `checksSeen` (RAM included) instead of the usual OR fold-back — see `writeChecksSeen`'s `forceOverwrite` parameter above and the spec's "Reset uses an epoch counter" decision.
 
 - [ ] **Step 1: Create `config/share_config.example.txt`**
 
@@ -2429,14 +2529,24 @@ local function readChecksSeen()
     return arr
 end
 
-local function writeChecksSeen(merged)
+-- forceOverwrite=false (normal case): OR the merged bytes into live RAM, same
+-- fold-back style as boot.lua's own synchronize_or, so a very recent
+-- not-yet-uploaded in-game discovery isn't lost.
+-- forceOverwrite=true (a new resetEpoch was just detected): overwrite RAM
+-- directly instead, since the whole point is to discard whatever stale bits
+-- are still sitting there from before the reset.
+local function writeChecksSeen(merged, forceOverwrite)
     for i = 0, 95 do
         sessionSave.checksSeen[i] = merged[i + 1]
     end
     local title = currentTitle()
     local baseOffset = (title - 1) * cChecksPerTitle
     for i = 0, cChecksPerTitle - 1 do
-        cpu[addrChecksSeen + i] = cpu[addrChecksSeen + i] | merged[baseOffset + i + 1]
+        if forceOverwrite then
+            cpu[addrChecksSeen + i] = merged[baseOffset + i + 1]
+        else
+            cpu[addrChecksSeen + i] = cpu[addrChecksSeen + i] | merged[baseOffset + i + 1]
+        end
     end
 end
 
@@ -2457,13 +2567,14 @@ local roomUrl = cfg.worker_url .. "/room/" .. urlEncode(sessionSave.param)
 local shareMode = nil
 local previousItems = nil
 local waitFrames = 0
+local knownEpoch = 0
 
 local function statusLine(text)
     Text.out(16, 32, "share_info: " .. text, ew.RGB(255, 255, 0), ew.RGBA(0, 0, 0, 192))
 end
 
 local function pollRoom()
-    local result, err = Http.postJson(roomUrl .. "/sync", { checksSeen = readChecksSeen() })
+    local result, err = Http.postJson(roomUrl .. "/sync", { checksSeen = readChecksSeen(), epoch = knownEpoch })
     if not result then
         statusLine("connection failed (" .. tostring(err) .. ")")
         return
@@ -2474,7 +2585,9 @@ local function pollRoom()
     end
 
     shareMode = result.mode
-    writeChecksSeen(result.checksSeen)
+    local roomWasReset = result.epoch > knownEpoch
+    knownEpoch = result.epoch
+    writeChecksSeen(result.checksSeen, roomWasReset)
 
     if shareMode == "checksSeen+items" then
         local items = readItems()
@@ -2524,12 +2637,13 @@ end
 6. In BizHawk 2, check the same address after its own next poll cycle: `print(cpu[0x7FFF80])` — expected: bit 0 is set there too, confirming cross-instance sync.
 7. In BizHawk 1, pick up a real item. Expected: within one poll cycle, `admin/host_admin.html`'s "Refresh Status" shows `event count` incremented, and (if `tracker/event_feed.html` is open on the same room) the event appears live with `player1`'s name and the correct icon.
 8. Stop BizHawk 2's `share_info.lua` (or don't load it yet) and confirm BizHawk 1 alone shows the "waiting"/error status line if the room doesn't exist yet — test this by pointing at a fresh, uncreated room key temporarily.
+9. **Reset-sticks check (the epoch mechanism, Task 3/4):** with both instances still running and `checksSeen` bit 0 set on both from step 5-6, open `admin/host_admin.html`, fill in the admin secret you chose in step 3, and click **Reset Room**. Wait one full poll cycle (~5-10s) on both instances, then check `cpu[0x7FFF80]` via the Lua Console on *both*: expected `0` on both — confirming the reset actually stuck rather than either instance silently re-uploading its own already-known bit 0 and undoing it. This is the scenario the plain OR-merge design would have failed without the epoch check.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add config/share_config.example.txt lua/config.lua lua/share_info.lua
-git commit -m "Add companion Lua script tying config, HTTP sync, and item-pickup events together"
+git commit -m "Add companion Lua script tying config, epoch-aware HTTP sync, and item-pickup events together"
 ```
 
 ---
