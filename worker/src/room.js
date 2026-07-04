@@ -1,5 +1,5 @@
-import { countSetBits } from "./bits.js";
-import { isValidMode, isValidAdminSecret } from "./validation.js";
+import { orMergeBytes, countSetBits } from "./bits.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch } from "./validation.js";
 
 const CHECKS_SEEN_LENGTH = 96;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -28,6 +28,9 @@ export class RoomDO {
     }
     if (path === "/admin/reset" && request.method === "POST") {
       return this.handleReset(request);
+    }
+    if (path === "/sync" && request.method === "POST") {
+      return this.handleSync(request);
     }
     return jsonResponse({ error: "not found" }, 404);
   }
@@ -87,5 +90,26 @@ export class RoomDO {
     await this.state.storage.put("events", []);
     await this.scheduleExpiry();
     return jsonResponse({ ok: true });
+  }
+
+  async handleSync(request) {
+    const mode = await this.state.storage.get("mode");
+    if (!mode) {
+      return jsonResponse({ error: "room not initialized" }, 409);
+    }
+    const body = await request.json().catch(() => null);
+    if (!body || !isValidChecksSeenArray(body.checksSeen) || !isValidEpoch(body.epoch)) {
+      return jsonResponse({ error: "invalid checksSeen or epoch" }, 400);
+    }
+    const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
+    const stored = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
+
+    let merged = stored;
+    if (body.epoch >= currentEpoch) {
+      merged = orMergeBytes(stored, body.checksSeen);
+      await this.state.storage.put("checksSeen", merged);
+    }
+    await this.scheduleExpiry();
+    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch });
   }
 }
