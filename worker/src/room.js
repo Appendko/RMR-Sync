@@ -1,7 +1,8 @@
 import { orMergeBytes, countSetBits } from "./bits.js";
-import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch } from "./validation.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, validateEventBody } from "./validation.js";
 
 const CHECKS_SEEN_LENGTH = 96;
+const MAX_EVENTS = 200;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 function jsonResponse(data, status = 200) {
@@ -31,6 +32,9 @@ export class RoomDO {
     }
     if (path === "/sync" && request.method === "POST") {
       return this.handleSync(request);
+    }
+    if (path === "/event" && request.method === "POST") {
+      return this.handleEvent(request);
     }
     return jsonResponse({ error: "not found" }, 404);
   }
@@ -111,5 +115,39 @@ export class RoomDO {
     }
     await this.scheduleExpiry();
     return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch });
+  }
+
+  async handleEvent(request) {
+    const mode = await this.state.storage.get("mode");
+    if (!mode) {
+      return jsonResponse({ error: "room not initialized" }, 409);
+    }
+    if (mode !== "checksSeen+items") {
+      return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
+    }
+    const body = await request.json().catch(() => null);
+    const validationError = validateEventBody(body);
+    if (validationError) {
+      return jsonResponse({ error: validationError }, 400);
+    }
+    const events = (await this.state.storage.get("events")) ?? [];
+    const event = { player: body.player, game: body.game, items: body.items, ts: Date.now() };
+    events.push(event);
+    const trimmed = events.slice(-MAX_EVENTS);
+    await this.state.storage.put("events", trimmed);
+    await this.scheduleExpiry();
+    this.broadcast({ type: "event", event });
+    return jsonResponse({ ok: true });
+  }
+
+  broadcast(message) {
+    const payload = JSON.stringify(message);
+    for (const socket of this.sockets) {
+      try {
+        socket.send(payload);
+      } catch {
+        this.sockets.delete(socket);
+      }
+    }
   }
 }
