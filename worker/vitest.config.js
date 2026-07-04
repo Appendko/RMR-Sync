@@ -1,10 +1,13 @@
-import { cloudflarePool } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
+import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 
-export default {
-  test: {
-    globals: true,
-    pool: cloudflarePool({
+export default defineConfig({
+  plugins: [
+    cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
     }),
+  ],
+  test: {
+    globals: true,
   },
-};
+});
