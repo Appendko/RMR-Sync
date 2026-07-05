@@ -112,6 +112,9 @@ async function refreshStatus() {
     const res = await fetch(getRoomUrl("/admin/status"));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.mode) {
+      document.getElementById("mode").value = data.mode;
+    }
     showStatus(
       `mode: ${data.mode ?? "(not created yet)"}\n` +
       `checksSeen bits set: ${data.checksSeenBitsSet}\n` +
