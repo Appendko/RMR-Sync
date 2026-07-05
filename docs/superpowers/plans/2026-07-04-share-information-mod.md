@@ -4,9 +4,9 @@
 
 **Goal:** Build a companion mod for RouteMatriX Randomizer that lets multiple players on the same seed share scouted-location intel (`checksSeen`) and a live item-pickup event feed, backed by a Cloudflare Worker + Durable Object.
 
-**Architecture:** A Cloudflare Worker routes `/room/{param}/...` requests to a per-room Durable Object (one per seed, isolated via `idFromName`). Every player runs an identical BizHawk companion Lua script that polls the room over plain HTTP. A separate admin webpage creates/resets/inspects a room over `fetch()`. A separate tracker webpage renders the live event feed over WebSocket.
+**Architecture:** A Cloudflare Worker routes `/room/{param}/...` requests to a per-room Durable Object (one per seed, isolated via `idFromName`). Every player runs an identical BizHawk companion Lua script that never calls the network directly (confirmed non-viable by Task 13's spike — `comm.http*` blocks the emulation thread and has no async variant) — instead it reads/writes two local JSON files, which a per-player browser relay page (`tracker/sync_relay.html`, File System Access API) forwards to the Worker over `fetch()`. A separate admin webpage creates/resets/inspects a room over `fetch()`. A separate tracker webpage renders the live event feed over WebSocket.
 
-**Tech Stack:** Cloudflare Workers + Durable Objects (JavaScript, ES modules), Vitest + `@cloudflare/vitest-pool-workers` for backend tests, Node's built-in test runner for the icon-mapping module, plain HTML/CSS/JS for the two static pages (no build step), Lua for the BizHawk companion script (BizHawk's embedded Lua, which supports 5.3-style bitwise operators — confirmed by existing `ref/` scripts).
+**Tech Stack:** Cloudflare Workers + Durable Objects (JavaScript, ES modules), Vitest + `@cloudflare/vitest-pool-workers` for backend tests, Node's built-in test runner for the icon-mapping module, plain HTML/CSS/JS for the static pages (no build step; the sync-relay page additionally requires a Chromium browser for the File System Access API), Lua for the BizHawk companion script (BizHawk's embedded Lua, which supports 5.3-style bitwise operators — confirmed by existing `ref/` scripts) plus a standalone Lua 5.4 interpreter (installed via `winget install DEVCOM.Lua`) for automated testing of the pure, BizHawk-independent Lua modules (`json.lua`, `file_relay.lua`, `share_logic.lua`).
 
 ## Global Constraints
 
@@ -23,6 +23,9 @@
 - Node.js v24 and Wrangler (via `npx wrangler`) are already installed and authenticated in `worker/` (done earlier in this session — `npx wrangler whoami` should show a logged-in account). Do not re-run `wrangler login` unless it reports being logged out.
 - `worker/wrangler.toml` currently still has the throwaway test config (`name = "rmr-share-test"`, binding `TEST_DO`/class `TestDO`) — Task 1 replaces it with the real one. The throwaway Worker was already deleted from Cloudflare (`wrangler delete`), so there's no conflicting deployment.
 - On Windows, if `node`/`npm`/`npx` aren't recognized in a fresh shell, prefix the command with: `$env:Path += ";C:\Program Files\nodejs"` (PowerShell) — this was needed throughout this session because PATH wasn't refreshed after installing Node.
+- BizHawk needs **no special launch flags** (`--url_get`/`--url_post` are not required by anything in this plan) — `share_info.lua` never calls `comm.http*`, so BizHawk's HTTP subsystem is never touched. Do not reintroduce a direct `comm.http*` call anywhere without re-opening Task 13's findings first.
+- The file-relay contract (`rmrsync_out.json`/`rmrsync_in.json`, written next to `boot.lua`) does not rely on `os.rename`/`os.remove` for atomicity on the Lua side — those appear nowhere in `ref/` and aren't assumed reliable in BizHawk's sandbox. Torn-read tolerance instead comes from: a single writer per file, a session+seq correlation guard, and (browser side) `createWritable()`'s atomic-on-close behavior in Chromium.
+- `tracker/sync_relay.html` is deliberately a separate page from `tracker/event_feed.html` — the relay needs Chromium-only, intrusive folder read-write access; the event feed must stay zero-permission, read-only, and usable in any browser.
 
 ---
 
@@ -2298,130 +2301,203 @@ git commit -m "Add minimal Lua JSON encode/decode module"
 
 ---
 
-### Task 13: Verify BizHawk's HTTP capability (spike)
+### Task 13: Verify BizHawk's HTTP capability (spike) — COMPLETE, findings below
 
-**Files:** none created — this is a manual verification task whose output is a go/no-go decision for Task 14.
+**Files:** none created — this was a manual verification task performed live against a real BizHawk 2.11 session and the real deployed backend. The result changed the architecture (see Tasks 14-16 below), so this section is kept as a record of what was actually found rather than the speculative steps originally planned.
 
-**Interfaces:** none yet — this determines what Task 14 can safely assume about `comm.httpGet`/`comm.httpPost`.
+**What was tested and found:**
 
-This is the spec's flagged open item: BizHawk's Lua `comm` library is documented to include synchronous `comm.httpGet(url)` and `comm.httpPost(url, payload)` functions, but the `ref/` scripts have never exercised them, so this must be confirmed against the actual BizHawk build before `lua/http_client.lua` is written to depend on them.
+1. `print(type(comm), type(comm.httpGet), type(comm.httpPost))` → `table  userdata  userdata` (not `function` — BizHawk exposes these as NLua-wrapped .NET delegates, but they remain callable; this by itself is not a problem).
+2. A first `comm.httpGet(...)` call failed with `HTTP was not initialized, please initialize it via the command line` — BizHawk's HTTP subsystem is **disabled unless launched with `--url_get=<pattern> --url_post=<pattern>`**. After relaunching EmuHawk with `--url_get=. --url_post=.`, the same `comm.httpGet` call succeeded and returned the expected JSON from `/admin/status`.
+3. `comm.httpPost(...)` to `/admin/init` returned nothing printable (`(no return)`), even wrapped in `pcall` (`ok=true, result=nil`) — confirmed **`comm.httpPost` does not return the response body**, unlike `httpGet`.
+4. Both `comm.httpGet` and `comm.httpPost` were observed to **audibly stutter the emulator's sound on every call** — i.e. both block the emulation thread while waiting on the network round trip.
+5. `comm.httpSetGetUrl(".")` was tried (hoping to configure the URL pattern from Lua instead of requiring launch flags) — it threw `System.NullReferenceException` from BizHawk's own `CommLuaLibrary.HttpSetGetUrl`, confirming the HTTP subsystem object is never constructed unless the `--url_get`/`--url_post` launch flags were present at process start. There is no way to enable it from Lua alone.
+6. Full enumeration `for k,v in pairs(comm) do print(k,type(v)) end` confirmed there is **no async HTTP variant anywhere** in this BizHawk build (`httpGetAsync`/`httpPostAsync` do not exist) — only `httpGet`, `httpPost`, `httpTest`, `httpSetGetUrl`/`httpSetPostUrl`/`httpGetGetUrl`/`httpGetPostUrl`, `httpSetTimeout`, `httpTestGet`, `httpPostScreenshot`, plus unrelated `socketServer*`/`mmf*` entries.
 
-- [ ] **Step 1: Start the real backend (or local dev server) and boot a game**
-
-Either keep `npm run dev` running in `worker/` (Task 8), or use the already-deployed URL from Task 8. Load `boot.lua` in BizHawk against a real ROM and let it boot into gameplay (past the boss-select/boot sequence).
-
-- [ ] **Step 2: Test `comm.httpGet` from the Lua Console**
-
-With the game running, type into BizHawk's Lua Console (substituting your dev or deployed URL, and using a room that exists — create one via `admin/host_admin.html` first if needed, e.g. `manual-comm-test`):
-
-```lua
-print(type(comm), type(comm.httpGet), type(comm.httpPost))
-```
-
-Expected: `table    function    function`. If either is `nil`, **stop here** — `comm.httpGet`/`httpPost` aren't available on this BizHawk build, and Task 14 needs to be revised (e.g. checking for `comm.httpGetAsync`/`httpPostAsync` instead, or a different BizHawk version) before proceeding. Report back with what `type(comm.httpGet)` etc. actually returned.
-
-- [ ] **Step 3: Test an actual GET call**
-
-```lua
-print(comm.httpGet("http://127.0.0.1:8787/room/manual-comm-test/admin/status"))
-```
-
-(Use the deployed `https://` URL instead if not running `wrangler dev` locally.)
-
-Expected: prints a JSON string like `{"mode":null,"checksSeenBitsSet":0,"eventCount":0,"connected":0}` (or the room's actual state if already created). If this throws an error or hangs indefinitely, **stop here** and report the exact error — it may indicate BizHawk needs a setting enabled (e.g. `comm.httpSetTimeout`) or that outbound HTTP is blocked.
-
-- [ ] **Step 4: Test an actual POST call**
-
-```lua
-print(comm.httpPost("http://127.0.0.1:8787/room/manual-comm-test/admin/init", "{\"mode\":\"checksSeen\",\"adminSecret\":\"test-secret\"}"))
-```
-
-Expected: prints `{"mode":"checksSeen","created":true}` (or `created:false` if already created from Step 3's room). If this succeeds, Task 14 can proceed exactly as written. If it fails in any way, stop and report the exact behavior before writing `lua/http_client.lua` — do not guess at a fix.
+**Conclusion:** calling `comm.http*` directly from `share_info.lua` is not viable — every call blocks the emulation thread (audible stutter on every poll cycle, since there is no async alternative to fall back to), and `httpPost` can't even deliver its response back to Lua. **Tasks 14-16 below replace the original "Lua HTTP client wrapper" plan entirely** with a local-file relay: `share_info.lua` only ever does local file I/O (fast, no stutter), and a separate browser page (`tracker/sync_relay.html`, opened once per player) does the actual networking to the Worker, using the File System Access API to read/write those same local files. A useful side effect: since `share_info.lua` never touches `comm.http*` anymore, **BizHawk needs no special launch flags at all** — this whole command-line requirement is moot for players.
 
 ---
 
-### Task 14: Lua HTTP client wrapper
+### Task 14: Lua file-relay module
 
 **Files:**
-- Create: `lua/http_client.lua`
+- Create: `lua/file_relay.lua`
+- Create: `lua/file_relay_test.lua` (test script, run via the standalone Lua interpreter — not loaded by BizHawk)
 
 **Interfaces:**
-- Consumes: `json` global from `lua/json.lua` (Task 12); `comm.httpPost`, confirmed available in Task 13.
-- Produces: `Http.postJson(url, tbl): (table|nil, string|nil)` — returns `(decodedResponse, nil)` on success or `(nil, errorMessage)` on any failure (network error, non-JSON response, or `comm.httpPost` unavailable). Isolates all networking-API risk to this one file, per the spec's note that `comm.http*` needs double-checking. (Only `POST` is needed — `share_info.lua`, Task 15, only ever calls `/sync` and `/event`, both `POST`; there's no `GET` call anywhere in the design, so no `Http.getJson` is defined.)
+- Consumes: `json` global from `lua/json.lua` (Task 12).
+- Produces: `Relay.writeOutbox(doc): (boolean, string|nil)` — encodes `doc` as JSON and writes it to `rmrsync_out.json` (bare relative filename, same convention as `ref/`'s `RMR_progress_tracker.lua`/`lib_util2.lua`); returns `(true, nil)` on success or `(false, errorMessage)` if the file can't be opened for writing. `Relay.readInbox(): table|nil` — reads `rmrsync_in.json`, JSON-decodes it, and returns the decoded table, or `nil` if the file doesn't exist, is empty, or fails to parse (a torn read from the browser mid-write, or no response written yet — both are expected, recoverable conditions, not errors).
 
-**Precondition:** Task 13 confirmed `comm.httpPost` works as expected. If Task 13 found different behavior, adapt the implementation below accordingly before proceeding.
+**Design note — no rename/atomicity needed on this side:** `os.rename`/`os.remove` appear nowhere in `ref/`'s Lua code (confirmed by direct inspection), so this module doesn't depend on them. `writeOutbox` does a plain `io.open(...,"w")` → `write` → `close`, exactly like every existing writer in this codebase. The browser relay page (Task 16) tolerates an occasional torn read of `rmrsync_out.json` by simply skipping that poll tick, and its own writes to `rmrsync_in.json` use the File System Access API's `createWritable()`, which is atomic-on-close in Chromium — so `readInbox` never needs to handle a torn *inbox* file, only a possibly-missing one.
 
-- [ ] **Step 1: Implement `lua/http_client.lua`**
+- [ ] **Step 1: Write the failing tests**
+
+Create `lua/file_relay_test.lua`:
+
+```lua
+package.path = package.path..";lua\\?.lua"
+require "json"
+require "file_relay"
+
+local function assertEqual(actual, expected, label)
+    if actual ~= expected then
+        error(label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+    end
+end
+
+-- writeOutbox produces a file readInbox-compatible JSON can decode back
+local ok, err = Relay.writeOutbox({ session = "abc123", seq = 1, sync = { checksSeen = {0, 1, 2}, epoch = 0 } })
+assertEqual(ok, true, "writeOutbox ok")
+assertEqual(err, nil, "writeOutbox err")
+
+local fh = io.open("rmrsync_out.json", "r")
+local raw = fh:read("*a")
+fh:close()
+local decoded = json.decode(raw)
+assertEqual(decoded.session, "abc123", "outbox session round-trip")
+assertEqual(decoded.seq, 1, "outbox seq round-trip")
+assertEqual(decoded.sync.checksSeen[1], 0, "outbox checksSeen[1] round-trip")
+assertEqual(decoded.sync.epoch, 0, "outbox epoch round-trip")
+os.remove("rmrsync_out.json")
+
+-- readInbox: missing file -> nil, not an error
+os.remove("rmrsync_in.json")
+assertEqual(Relay.readInbox(), nil, "readInbox missing file")
+
+-- readInbox: valid file -> decoded table
+local fh2 = io.open("rmrsync_in.json", "w")
+fh2:write('{"session":"abc123","seq":1,"ok":true,"sync":{"mode":"checksSeen","checksSeen":[1,1,0],"epoch":0},"eventsPosted":0,"error":null}')
+fh2:close()
+local inbox = Relay.readInbox()
+assertEqual(inbox.session, "abc123", "readInbox session")
+assertEqual(inbox.ok, true, "readInbox ok")
+assertEqual(inbox.sync.mode, "checksSeen", "readInbox sync.mode")
+assertEqual(inbox.sync.checksSeen[1], 1, "readInbox sync.checksSeen[1]")
+
+-- readInbox: empty file -> nil, not an error
+local fh3 = io.open("rmrsync_in.json", "w")
+fh3:write("")
+fh3:close()
+assertEqual(Relay.readInbox(), nil, "readInbox empty file")
+
+-- readInbox: torn/garbage file -> nil, not a crash
+local fh4 = io.open("rmrsync_in.json", "w")
+fh4:write('{"session":"abc123","seq":1,"ok":tr')  -- truncated mid-value
+fh4:close()
+assertEqual(Relay.readInbox(), nil, "readInbox torn file")
+
+os.remove("rmrsync_in.json")
+print("ALL PASS")
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run (adjust the path to wherever the standalone interpreter is installed, e.g. `C:\Users\<you>\AppData\Local\Programs\Lua\bin\lua.exe`, or just `lua` if it's on `PATH`):
+
+```bash
+cd lua && lua file_relay_test.lua
+```
+
+Expected: fails with a `module 'file_relay' not found` error (or similar), since `lua/file_relay.lua` doesn't exist yet.
+
+- [ ] **Step 3: Implement `lua/file_relay.lua`**
 
 ```lua
 package.path = package.path..";lua\\?.lua"
 require "json"
 
-Http = {}
+Relay = {}
 
-function Http.postJson(url, tbl)
-    if not comm or not comm.httpPost then
-        return nil, "comm.httpPost is not available in this BizHawk build"
+local OUTBOX_FILE = "rmrsync_out.json"
+local INBOX_FILE = "rmrsync_in.json"
+
+function Relay.writeOutbox(doc)
+    local fh = io.open(OUTBOX_FILE, "w")
+    if not fh then
+        return false, "cannot open " .. OUTBOX_FILE .. " for writing"
     end
-    local payload = json.encode(tbl)
-    local ok, body = pcall(comm.httpPost, url, payload)
+    fh:write(json.encode(doc))
+    fh:close()
+    return true, nil
+end
+
+function Relay.readInbox()
+    local fh = io.open(INBOX_FILE, "r")
+    if not fh then
+        return nil
+    end
+    local body = fh:read("*a")
+    fh:close()
+    if not body or body == "" then
+        return nil
+    end
+    local ok, decoded = pcall(json.decode, body)
     if not ok then
-        return nil, "http error: " .. tostring(body)
+        return nil
     end
-    local decodeOk, decoded = pcall(json.decode, body)
-    if not decodeOk then
-        return nil, "json decode error: " .. tostring(decoded)
-    end
-    return decoded, nil
+    return decoded
 end
 ```
 
-- [ ] **Step 2: Manually verify in BizHawk's Lua Console**
+- [ ] **Step 4: Run the test to verify it passes**
 
-Using the same room as Task 13:
+Run: `cd lua && lua file_relay_test.lua`
+Expected: prints `ALL PASS` with no errors.
 
-```lua
-package.path = package.path..";lua\\?.lua"
-require "http_client"
-
-local result, err = Http.postJson("http://127.0.0.1:8787/room/manual-comm-test/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)(), epoch = 0 })
-print(err)
-print(result and result.mode)
-```
-
-Expected: `err` prints as `nil`, `result.mode` prints as `checksSeen` (the mode set in Task 13). Then test the error path with a nonexistent room:
-
-```lua
-local result2, err2 = Http.postJson("http://127.0.0.1:8787/room/does-not-exist-yet/sync", { checksSeen = (function() local t={} for i=1,96 do t[i]=0 end return t end)(), epoch = 0 })
-print(err2)
-print(result2 and result2.error)
-```
-
-Expected: `err2` prints as `nil` (the HTTP call itself succeeded), and `result2.error` prints as `room not initialized` (the Worker's own error body, correctly decoded).
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add lua/http_client.lua
-git commit -m "Add Lua HTTP client wrapper over comm.httpGet/httpPost"
+git add lua/file_relay.lua lua/file_relay_test.lua
+git commit -m "Add Lua file-relay module (outbox/inbox JSON files, replaces http_client)"
 ```
 
 ---
 
-### Task 15: Config loader + main companion script
+### Task 15: Config loader + share logic + main companion script
 
 **Files:**
 - Create: `config/share_config.example.txt`
 - Create: `lua/config.lua`
+- Create: `lua/share_logic.lua` (pure, BizHawk-independent decision logic, extracted for standalone testing)
+- Create: `lua/share_logic_test.lua` (test script, run via the standalone Lua interpreter)
 - Create: `lua/share_info.lua`
 
 **Interfaces:**
-- Consumes: `Http.postJson` from `lua/http_client.lua` (Task 14); globals from `boot.lua` (already running): `cpu`, `cpu2`, `ew`, `Text`, `sessionSave.param`, `sessionSave.checksSeen`.
-- Produces: `ShareConfig.load(filename): (table|nil, string|nil)`; the running `share_info.lua` script itself (no other file depends on it — it's the top-level entry point players load in BizHawk).
+- Consumes: `Relay.writeOutbox`/`Relay.readInbox` from `lua/file_relay.lua` (Task 14); globals from `boot.lua` (already running): `cpu`, `cpu2`, `ew`, `Text`, `sessionSave.param`, `sessionSave.checksSeen`.
+- Produces: `ShareConfig.load(filename): (table|nil, string|nil)`; `ShareLogic.diffNewBits(before, after): number[]` (0-based newly-set bit offsets); `ShareLogic.isResponseFor(msg, session, outstandingSeq): boolean`; `ShareLogic.shouldForceOverwrite(responseEpoch, knownEpoch): boolean`; the running `share_info.lua` script itself (no other file depends on it — it's the top-level entry point players load in BizHawk). Consumed by Task 16's browser relay page only indirectly, via the outbox/inbox JSON shape both sides agree on (documented below).
+
+**Outbox/inbox JSON shape (the contract Task 16's browser relay page must also implement):**
+
+Outbox (`rmrsync_out.json`, written by this task, read by Task 16):
+```json
+{
+  "session": "a3f9c1",
+  "seq": 42,
+  "workerUrl": "https://rmr-sync.append-rmr.workers.dev",
+  "roomKey": "V204#X7#SV8d5m27k+p99XcvrXsSiYA#...",
+  "player": "ds83171",
+  "sync": { "checksSeen": [ /* 96 ints, 0-255 */ ], "epoch": 3 },
+  "events": [ { "game": 2, "items": [297, 40] } ]
+}
+```
+`session` is a random id generated once per `share_info.lua` load (lets the relay page discard stale leftovers from a previous run); `seq` increments once per new outstanding request, the correlation key the relay echoes back. `events` may be an empty array.
+
+Inbox (`rmrsync_in.json`, written by Task 16's relay page, read by this task):
+```json
+{
+  "session": "a3f9c1",
+  "seq": 42,
+  "ok": true,
+  "sync": { "mode": "checksSeen+items", "checksSeen": [ /* 96 merged ints */ ], "epoch": 3 },
+  "eventsPosted": 1,
+  "error": null
+}
+```
+`ok:false` + a non-null `error` surfaces a Worker error (or network failure) straight to Lua's on-screen status line.
 
 **Note:** `share_info.lua` does **not** use `itemName` (from `ref/multiworld/lua/itemName.lua`) at all — see Task 10's design note. It sends raw numeric item IDs to `/event`; the tracker (Task 10/11) is solely responsible for turning an ID into a label or icon.
 
-**Note on epoch tracking:** `share_info.lua` never calls `/admin/reset` itself, but it does react to a reset happening. It keeps a local `knownEpoch`, sent with every `/sync` call. When the server's response reports a newer epoch than it knew about, it overwrites its local `checksSeen` (RAM included) instead of the usual OR fold-back — see `writeChecksSeen`'s `forceOverwrite` parameter above and the spec's "Reset uses an epoch counter" decision.
+**Note on epoch tracking:** `share_info.lua` never calls `/admin/reset` itself, but it does react to a reset happening. It keeps a local `knownEpoch`, sent in every outbox `sync.epoch`. When an inbox response reports a newer epoch than it knew about, `ShareLogic.shouldForceOverwrite` returns `true` and the script overwrites its local `checksSeen` (RAM included) instead of the usual OR fold-back — see `writeChecksSeen`'s `forceOverwrite` parameter below and the spec's "Reset uses an epoch counter" decision. This logic is identical to the original direct-HTTP design; only the transport (file relay instead of `comm.http*`) changed.
 
 - [ ] **Step 1: Create `config/share_config.example.txt`**
 
@@ -2492,28 +2568,124 @@ print(err2)
 
 Expected: `config file not found: does_not_exist.txt`. Delete `test_config.txt` once confirmed.
 
-- [ ] **Step 4: Implement `lua/share_info.lua`**
+- [ ] **Step 4: Write the failing tests for `lua/share_logic.lua`**
+
+Create `lua/share_logic_test.lua`:
+
+```lua
+package.path = package.path..";lua\\?.lua"
+require "share_logic"
+
+local function assertEqual(actual, expected, label)
+    if actual ~= expected then
+        error(label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+    end
+end
+
+-- diffNewBits: detects newly-set bits across a byte-array change
+local before = { 0, 0xFF, 0 }
+local after  = { 1, 0xFF, 0x80 }
+local acquired = ShareLogic.diffNewBits(before, after)
+assertEqual(#acquired, 2, "diffNewBits count")
+assertEqual(acquired[1], 0, "diffNewBits first bit offset")   -- byte 1 bit 0 -> offset 0
+assertEqual(acquired[2], 23, "diffNewBits second bit offset") -- byte 3 bit 7 -> offset (3-1)*8+7
+
+assertEqual(#ShareLogic.diffNewBits({ 5, 5, 5 }, { 5, 5, 5 }), 0, "diffNewBits no change")
+assertEqual(#ShareLogic.diffNewBits({ 1 }, { 0 }), 0, "diffNewBits bit cleared not reported")
+
+-- isResponseFor: matches session+seq of the currently outstanding request
+assertEqual(ShareLogic.isResponseFor({ session = "a", seq = 3 }, "a", 3), true, "isResponseFor match")
+assertEqual(ShareLogic.isResponseFor({ session = "a", seq = 2 }, "a", 3), false, "isResponseFor wrong seq")
+assertEqual(ShareLogic.isResponseFor({ session = "b", seq = 3 }, "a", 3), false, "isResponseFor wrong session")
+assertEqual(ShareLogic.isResponseFor(nil, "a", 3), false, "isResponseFor nil message")
+
+-- shouldForceOverwrite: epoch strictly ahead of what we knew -> force overwrite instead of OR-fold
+assertEqual(ShareLogic.shouldForceOverwrite(2, 1), true, "shouldForceOverwrite ahead")
+assertEqual(ShareLogic.shouldForceOverwrite(1, 1), false, "shouldForceOverwrite equal")
+assertEqual(ShareLogic.shouldForceOverwrite(0, 1), false, "shouldForceOverwrite behind")
+
+print("ALL PASS")
+```
+
+- [ ] **Step 5: Run the test to verify it fails**
+
+Run: `cd lua && lua share_logic_test.lua`
+Expected: fails with a `module 'share_logic' not found` error (or similar), since `lua/share_logic.lua` doesn't exist yet.
+
+- [ ] **Step 6: Implement `lua/share_logic.lua`**
+
+```lua
+-- Pure decision logic with no BizHawk dependency (no cpu/ew/comm/sessionSave
+-- references), so it can be tested standalone. All bit tests use native Lua
+-- 5.3+ operators (&, |, <<) -- BizHawk's Lua fully supports these directly
+-- (confirmed by boot.lua's own usage); there is no need for a bit.* shim.
+
+ShareLogic = {}
+
+-- Returns a list of newly-set bit offsets (0-based) where `after` has a bit
+-- set that `before` didn't, scanning byte-by-byte (1-indexed arrays in,
+-- matching how share_info.lua reads RAM into plain Lua tables).
+function ShareLogic.diffNewBits(before, after)
+    local acquired = {}
+    for i = 1, #after do
+        local b = before[i] or 0
+        local a = after[i] or 0
+        if a ~= b then
+            for bit = 0, 7 do
+                local mask = 1 << bit
+                if (b & mask) == 0 and (a & mask) ~= 0 then
+                    table.insert(acquired, (i - 1) * 8 + bit)
+                end
+            end
+        end
+    end
+    return acquired
+end
+
+-- Does this inbox message answer the request we're currently waiting on?
+function ShareLogic.isResponseFor(msg, session, outstandingSeq)
+    return msg ~= nil and msg.session == session and msg.seq == outstandingSeq
+end
+
+-- Given the epoch reported in a sync response and the last epoch we knew
+-- about, should checksSeen be force-overwritten (a reset happened) instead
+-- of OR-folded?
+function ShareLogic.shouldForceOverwrite(responseEpoch, knownEpoch)
+    return responseEpoch > knownEpoch
+end
+```
+
+- [ ] **Step 7: Run the test to verify it passes**
+
+Run: `cd lua && lua share_logic_test.lua`
+Expected: prints `ALL PASS` with no errors.
+
+- [ ] **Step 8: Commit `lua/share_logic.lua`**
+
+```bash
+git add lua/share_logic.lua lua/share_logic_test.lua
+git commit -m "Add standalone-testable share-sync decision logic"
+```
+
+- [ ] **Step 9: Implement `lua/share_info.lua`**
 
 ```lua
 -- Load this script after boot.lua has finished booting into gameplay
--- (not during the boot/boss-select screen).
+-- (not during the boot/boss-select screen). No special BizHawk launch
+-- flags are needed -- this script never touches comm.http*; all networking
+-- is relayed through tracker/sync_relay.html (Task 16) via local files.
 
 package.path = package.path..";lua\\?.lua"
 require "json"
-require "http_client"
+require "file_relay"
+require "share_logic"
 require "config"
 
 local cChecksPerTitle = 0x20
 local addrChecksSeen = 0x7FFF80
 local addrItems = 0x7FFF00
 local cItems = 0x60
-local cWaitFrames = 300 -- poll roughly every 5 seconds at 60fps
-
-local function urlEncode(str)
-    return (str:gsub("[^%w_%-%.~]", function(c)
-        return string.format("%%%02X", c:byte())
-    end))
-end
+local cWaitFrames = 90 -- ~1.5s at 60fps; safe to poll this often now -- pure local file I/O, no network stutter
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -2531,7 +2703,7 @@ end
 
 -- forceOverwrite=false (normal case): OR the merged bytes into live RAM, same
 -- fold-back style as boot.lua's own synchronize_or, so a very recent
--- not-yet-uploaded in-game discovery isn't lost.
+-- not-yet-relayed in-game discovery isn't lost.
 -- forceOverwrite=true (a new resetEpoch was just detected): overwrite RAM
 -- directly instead, since the whole point is to discard whatever stale bits
 -- are still sitting there from before the reset.
@@ -2563,92 +2735,327 @@ if not cfg then
     error("share_info.lua: " .. cfgErr)
 end
 
-local roomUrl = cfg.worker_url .. "/room/" .. urlEncode(sessionSave.param)
+math.randomseed(os.time())
+local session = string.format("%06x", math.random(0, 0xFFFFFF))
+local seq = 0
+local outstandingSeq = nil
+local pendingEvents = {}
 local shareMode = nil
 local previousItems = nil
-local waitFrames = 0
 local knownEpoch = 0
+local waitFrames = 0
+local staleCycles = 0
 
 local function statusLine(text)
     Text.out(16, 32, "share_info: " .. text, ew.RGB(255, 255, 0), ew.RGBA(0, 0, 0, 192))
 end
 
-local function pollRoom()
-    local result, err = Http.postJson(roomUrl .. "/sync", { checksSeen = readChecksSeen(), epoch = knownEpoch })
-    if not result then
-        statusLine("connection failed (" .. tostring(err) .. ")")
+local function tryConsumeInbox()
+    local msg = Relay.readInbox()
+    if not ShareLogic.isResponseFor(msg, session, outstandingSeq) then
         return
     end
-    if result.error then
-        statusLine(tostring(result.error))
-        return
+    if msg.ok and msg.sync then
+        shareMode = msg.sync.mode
+        local forceOverwrite = ShareLogic.shouldForceOverwrite(msg.sync.epoch, knownEpoch)
+        knownEpoch = msg.sync.epoch
+        writeChecksSeen(msg.sync.checksSeen, forceOverwrite)
+        pendingEvents = {}
+        statusLine("synced (epoch " .. knownEpoch .. ")")
+    else
+        statusLine(tostring(msg.error or "relay error"))
     end
+    outstandingSeq = nil
+    staleCycles = 0
+end
 
-    shareMode = result.mode
-    local roomWasReset = result.epoch > knownEpoch
-    knownEpoch = result.epoch
-    writeChecksSeen(result.checksSeen, roomWasReset)
-
+local function issueRequest()
     if shareMode == "checksSeen+items" then
         local items = readItems()
         if previousItems then
-            local newlyAcquired = {}
-            for i = 1, cItems do
-                local before = previousItems[i]
-                local after = items[i]
-                if before ~= after then
-                    for bit = 0, 7 do
-                        local mask = 1 << bit
-                        if (before & mask) == 0 and (after & mask) ~= 0 then
-                            table.insert(newlyAcquired, (i - 1) * 8 + bit)
-                        end
-                    end
-                end
-            end
-            if #newlyAcquired > 0 then
-                Http.postJson(roomUrl .. "/event", {
-                    player = cfg.player_name,
-                    game = currentTitle(),
-                    items = newlyAcquired,
-                })
+            local acquired = ShareLogic.diffNewBits(previousItems, items)
+            if #acquired > 0 then
+                table.insert(pendingEvents, { game = currentTitle(), items = acquired })
             end
         end
         previousItems = items
     end
+
+    seq = seq + 1
+    outstandingSeq = seq
+    Relay.writeOutbox({
+        session = session,
+        seq = seq,
+        workerUrl = cfg.worker_url,
+        roomKey = sessionSave.param,
+        player = cfg.player_name,
+        sync = { checksSeen = readChecksSeen(), epoch = knownEpoch },
+        events = pendingEvents,
+    })
 end
 
 while true do
     waitFrames = waitFrames - 1
     if waitFrames <= 0 then
         waitFrames = cWaitFrames
-        pollRoom()
+        tryConsumeInbox()
+        if outstandingSeq == nil then
+            issueRequest()
+        else
+            staleCycles = staleCycles + 1
+            if staleCycles >= 4 then
+                statusLine("waiting for relay page (open tracker/sync_relay.html)")
+            end
+        end
     end
     ew.frameadvance()
 end
 ```
 
-- [ ] **Step 5: Manually verify with two BizHawk instances**
+- [ ] **Step 10: Manually verify with two BizHawk instances (no relay page yet — confirms the waiting/local-file side in isolation)**
 
 1. Set up two separate BizHawk instances, each with its own copy of a generated seed pack (same seed — use `ref/aaa` twice, in two different folders, or two fresh copies of the same generated pack).
-2. In each folder, copy `config/share_config.example.txt` to `share_config.txt` and fill in a distinct `player_name` for each (e.g. `player1`, `player2`) and the same `worker_url` (the deployed URL from Task 8, or a shared local dev server if both instances can reach the same machine).
-3. Use `admin/host_admin.html` to create a room with the room key set to the seed's actual Option string (from that seed pack's `spoiler.txt`) and mode `checksSeen+items`.
-4. In each BizHawk instance: load `boot.lua`, get past the boot sequence into gameplay, then load `lua/share_info.lua` as a second script.
-5. In BizHawk 1, scout/reveal a location that increases `checksSeen` (or, if a real in-game scouting trigger isn't readily reachable, simulate it by directly poking a `checksSeen` bit via the Lua Console: `cpu[0x7FFF80] = cpu[0x7FFF80] | 1`) and wait ~5-10 seconds (one poll cycle).
-6. In BizHawk 2, check the same address after its own next poll cycle: `print(cpu[0x7FFF80])` — expected: bit 0 is set there too, confirming cross-instance sync.
-7. In BizHawk 1, pick up a real item. Expected: within one poll cycle, `admin/host_admin.html`'s "Refresh Status" shows `event count` incremented, and (if `tracker/event_feed.html` is open on the same room) the event appears live with `player1`'s name and the correct icon.
-8. Stop BizHawk 2's `share_info.lua` (or don't load it yet) and confirm BizHawk 1 alone shows the "waiting"/error status line if the room doesn't exist yet — test this by pointing at a fresh, uncreated room key temporarily.
-9. **Reset-sticks check (the epoch mechanism, Task 3/4):** with both instances still running and `checksSeen` bit 0 set on both from step 5-6, open `admin/host_admin.html`, fill in the admin secret you chose in step 3, and click **Reset Room**. Wait one full poll cycle (~5-10s) on both instances, then check `cpu[0x7FFF80]` via the Lua Console on *both*: expected `0` on both — confirming the reset actually stuck rather than either instance silently re-uploading its own already-known bit 0 and undoing it. This is the scenario the plain OR-merge design would have failed without the epoch check.
+2. In each folder, copy `config/share_config.example.txt` to `share_config.txt` and fill in a distinct `player_name` for each (e.g. `player1`, `player2`) and the same `worker_url` (the deployed URL from Task 8).
+3. In each BizHawk instance: load `boot.lua` (plain launch, no `--url_get`/`--url_post` flags needed), get past the boot sequence into gameplay, then load `lua/share_info.lua` as a second script.
+4. Confirm each instance writes `rmrsync_out.json` next to `boot.lua` within one poll cycle (~1.5s), and shows "waiting for relay page" on-screen after a few cycles with no relay running yet — since Task 16 doesn't exist yet, there's nothing to answer it.
+5. Confirm no audible sound stutter occurs even as the poll cycle repeats continuously — the entire point of the file-relay pivot. (Full cross-instance sync and the reset-sticks check are deferred to Task 17's end-to-end pass, once Task 16's relay page exists to actually answer these requests.)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add config/share_config.example.txt lua/config.lua lua/share_info.lua
-git commit -m "Add companion Lua script tying config, epoch-aware HTTP sync, and item-pickup events together"
+git commit -m "Add companion Lua script: epoch-aware sync + item events via file relay"
 ```
 
 ---
 
-### Task 16: Top-level README and final end-to-end pass
+### Task 16: Browser sync-relay page
+
+**Files:**
+- Create: `tracker/sync_relay.html`
+- Create: `tracker/sync_relay.js`
+
+**Interfaces:**
+- Consumes: the outbox/inbox JSON shape defined in Task 15 (`rmrsync_out.json`/`rmrsync_in.json`); the deployed Worker's `/sync` and `/event` endpoints (unchanged since Task 4/5/7); the same `encodeURIComponent(roomKey)` convention used by `admin/host_admin.html` (Task 9) and `tracker/event_feed.js` (Task 11) when building `/room/{key}/...` URLs.
+- Produces: nothing consumed by other files — this is a standalone page a player opens once per session, like `event_feed.html`.
+
+**Scope note:** kept as a separate page from `tracker/event_feed.html` on purpose. `event_feed.html` must stay zero-permission and read-only (via plain WebSocket) so spectators — and anyone on Firefox/Safari — can keep watching it; folder-write access is only needed by players actually relaying their own game's sync data, and only Chromium browsers (Chrome/Edge/Brave) support the writable side of the File System Access API this page depends on.
+
+- [ ] **Step 1: Create `tracker/sync_relay.html`**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RMR Sync — Relay</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 2em auto; }
+  #status { white-space: pre-wrap; background: #f0f0f0; padding: 1em; border-radius: 4px; }
+  button { font-size: 1em; padding: 0.5em 1em; margin-right: 0.5em; }
+</style>
+</head>
+<body>
+<h1>RMR Sync — Relay</h1>
+<p>
+  Keep this tab open while you play. It reads your game's local sync files
+  and relays them to the Cloudflare backend — no other setup needed beyond
+  picking the folder that contains <code>boot.lua</code> once.
+  Requires Chrome, Edge, or another Chromium-based browser.
+</p>
+<button id="pickBtn">Choose game folder</button>
+<button id="reconnectBtn" style="display:none">Reconnect folder</button>
+<div id="status">Not connected.</div>
+<script src="sync_relay.js"></script>
+</body>
+</html>
+```
+
+- [ ] **Step 2: Create `tracker/sync_relay.js`**
+
+```js
+const statusEl = document.getElementById("status");
+const pickBtn = document.getElementById("pickBtn");
+const reconnectBtn = document.getElementById("reconnectBtn");
+
+let dirHandle = null;
+let lastSession = null;
+let lastSeq = -1;
+let pollHandle = null;
+
+function log(text) {
+  statusEl.textContent = text;
+}
+
+// --- minimal IndexedDB key-value store for persisting the directory handle ---
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("rmrsync_relay", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readonly");
+    const req = tx.objectStore("kv").get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function pickFolder() {
+  const handle = await window.showDirectoryPicker({ id: "rmrsync", mode: "readwrite" });
+  await idbSet("dirHandle", handle);
+  return handle;
+}
+
+async function restoreFolder() {
+  const handle = await idbGet("dirHandle");
+  if (!handle) return null;
+  if ((await handle.queryPermission({ mode: "readwrite" })) === "granted") return handle;
+  return "needs-permission";
+}
+
+async function writeInbox(dir, obj) {
+  const fh = await dir.getFileHandle("rmrsync_in.json", { create: true });
+  const w = await fh.createWritable();
+  await w.write(JSON.stringify(obj));
+  await w.close();
+}
+
+async function tick() {
+  let req;
+  try {
+    const fh = await dirHandle.getFileHandle("rmrsync_out.json");
+    req = JSON.parse(await (await fh.getFile()).text());
+  } catch {
+    return; // no outbox yet, or a torn read -- try again next tick
+  }
+
+  if (req.session !== lastSession) {
+    lastSession = req.session;
+    lastSeq = -1;
+  }
+  if (typeof req.seq !== "number" || req.seq <= lastSeq) {
+    return; // already handled, or malformed
+  }
+
+  const base = String(req.workerUrl || "").replace(/\/$/, "");
+  const room = `${base}/room/${encodeURIComponent(req.roomKey)}`;
+  const resp = { session: req.session, seq: req.seq, ok: false, sync: null, eventsPosted: 0, error: null };
+
+  try {
+    const syncResp = await fetch(`${room}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.sync),
+    });
+    const syncData = await syncResp.json();
+    if (!syncResp.ok) {
+      resp.error = syncData.error || `HTTP ${syncResp.status}`;
+    } else {
+      resp.sync = syncData;
+      resp.ok = true;
+      for (const ev of req.events || []) {
+        const evResp = await fetch(`${room}/event`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ player: req.player, game: ev.game, items: ev.items }),
+        });
+        if (evResp.ok) resp.eventsPosted++;
+      }
+    }
+  } catch (e) {
+    resp.error = String(e);
+  }
+
+  await writeInbox(dirHandle, resp);
+  lastSeq = req.seq;
+  log(`Connected. Last handled request: seq ${req.seq}${resp.error ? " (error: " + resp.error + ")" : ""}`);
+}
+
+function startPolling() {
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = setInterval(() => { tick().catch((e) => log("Relay error: " + e)); }, 1500);
+  log("Connected. Watching for sync requests...");
+}
+
+pickBtn.addEventListener("click", async () => {
+  try {
+    dirHandle = await pickFolder();
+    reconnectBtn.style.display = "none";
+    startPolling();
+  } catch (e) {
+    log("Folder selection cancelled or failed: " + e);
+  }
+});
+
+reconnectBtn.addEventListener("click", async () => {
+  const handle = await idbGet("dirHandle");
+  if (!handle) { log("No previously connected folder found."); return; }
+  const granted = await handle.requestPermission({ mode: "readwrite" });
+  if (granted === "granted") {
+    dirHandle = handle;
+    reconnectBtn.style.display = "none";
+    startPolling();
+  } else {
+    log("Permission not granted.");
+  }
+});
+
+(async () => {
+  const restored = await restoreFolder();
+  if (restored === "needs-permission") {
+    log("Previously connected folder needs permission again.");
+    reconnectBtn.style.display = "inline-block";
+  } else if (restored) {
+    dirHandle = restored;
+    startPolling();
+  } else {
+    log("Not connected. Click \"Choose game folder\" to select the folder containing boot.lua.");
+  }
+})();
+```
+
+- [ ] **Step 3: Manually verify against the real deployed Worker**
+
+1. Via `admin/host_admin.html`, create a room (e.g. room key `manual-relay-test`, mode `checksSeen+items`, any admin secret).
+2. Create an empty scratch folder anywhere on disk.
+3. Open `tracker/sync_relay.html` in Chrome or Edge, click **Choose game folder**, select that scratch folder, grant read-write access.
+4. Confirm the status area shows "Connected. Watching for sync requests..."
+5. In that scratch folder, hand-write a file `rmrsync_out.json`:
+   ```json
+   {"session":"test1","seq":1,"workerUrl":"https://rmr-sync.append-rmr.workers.dev","roomKey":"manual-relay-test","player":"tester","sync":{"checksSeen":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"epoch":0},"events":[{"game":2,"items":[40]}]}
+   ```
+6. Within ~1.5s, confirm the page writes `rmrsync_in.json` in the same folder with `"ok":true`, `"sync":{"mode":"checksSeen+items","checksSeen":[...merged bytes, first one 1...],"epoch":0}`, and `"eventsPosted":1`.
+7. Confirm the posted event appears live in `tracker/event_feed.html?room=manual-relay-test` (opened separately, any browser) with `tester`'s name and item 40's icon.
+8. Reload `sync_relay.html`. Confirm it restores the folder connection automatically (or, if the browser re-prompts for permission, that clicking **Reconnect folder** restores it) without needing to pick the folder again.
+9. Test the error path: hand-write another outbox pointing at a nonexistent room (`roomKey":"does-not-exist-yet"`, bump `seq` to `2`), confirm the inbox response comes back with `"ok":false` and a non-null `"error"`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tracker/sync_relay.html tracker/sync_relay.js
+git commit -m "Add browser sync-relay page (File System Access API <-> Worker)"
+```
+
+---
+
+### Task 17: Top-level README and final end-to-end pass
 
 **Files:**
 - Create: `README.md`
@@ -2679,11 +3086,19 @@ for the full design.
 - `admin/host_admin.html` — open this to create/reset/inspect a room. Not
   needed by regular players, only whoever is organizing the session.
 - `lua/share_info.lua` — the BizHawk companion script every player loads
-  after `boot.lua`. Copy `config/share_config.example.txt` to
-  `share_config.txt` next to `boot.lua` and fill in your name and the
-  Worker URL first.
+  after `boot.lua` (a plain launch — no special command-line flags needed).
+  Copy `config/share_config.example.txt` to `share_config.txt` next to
+  `boot.lua` and fill in your name and the Worker URL first. It only ever
+  reads/writes two small local files (`rmrsync_out.json`/`rmrsync_in.json`)
+  next to `boot.lua` — it never calls the network directly.
+- `tracker/sync_relay.html` — **each player** opens this once (Chrome, Edge,
+  or another Chromium browser) and picks the folder containing `boot.lua`.
+  It relays those local files to the Worker in the background; keep the tab
+  open while playing. This is what actually talks to the network on behalf
+  of `share_info.lua`.
 - `tracker/event_feed.html` — open with `?room=<the seed's Option string>`
-  to watch the live event feed.
+  to watch the live event feed. Read-only, works in any browser — no folder
+  access needed, unlike `sync_relay.html`.
 
 ## Quick start (for a group already using a deployed Worker)
 
@@ -2694,7 +3109,10 @@ for the full design.
    `share_config.txt` next to your `boot.lua`, fill in your name and the
    same Worker URL, then load `boot.lua` as normal, get into gameplay,
    and load `lua/share_info.lua` as a second script.
-3. Optional: anyone can open `tracker/event_feed.html?room=<option string>`
+3. Every player: open `tracker/sync_relay.html` in a Chromium browser,
+   click **Choose game folder**, and pick the folder containing your
+   `boot.lua`. Keep the tab open while you play.
+4. Optional: anyone can open `tracker/event_feed.html?room=<option string>`
    to watch the live feed.
 
 ## Deploying your own backend
@@ -2704,7 +3122,7 @@ point `worker_url` (in `share_config.txt` and the admin page) at your own
 deployed Worker.
 ```
 
-- [ ] **Step 2: Run the full backend automated test suite one final time**
+- [ ] **Step 2: Run the full automated test suite one final time**
 
 Run: `npm test` (in `worker/`)
 Expected: every suite from Tasks 1–7 passes.
@@ -2712,9 +3130,15 @@ Expected: every suite from Tasks 1–7 passes.
 Run: `node --test tracker/icon_map.test.mjs`
 Expected: all tests pass.
 
+Run (adjust the path to wherever the standalone Lua interpreter is installed if not on `PATH`):
+```bash
+cd lua && lua file_relay_test.lua && lua share_logic_test.lua
+```
+Expected: `ALL PASS` from both (Tasks 14/15's standalone-testable modules).
+
 - [ ] **Step 3: Full end-to-end pass**
 
-Repeat Task 15 Step 5 in full (two BizHawk instances, same seed, real playthrough) for 15-20 minutes of actual play rather than a single spot-check, watching for: dropped events (compare each instance's real acquired items against what appears in `tracker/event_feed.html`), any RAM/gameplay corruption from the `writeChecksSeen` fold-back (compare in-game hint behavior against the single-player `ref/multiworld` behavior — hints should never regress or show corrupted text), and whether the ~5-second poll cadence causes any noticeable emulation hitching (since `comm.httpGet`/`httpPost` are synchronous/blocking calls per Task 13's findings).
+Repeat Task 16 Step 3 and Task 15 Step 10 together, in full (two BizHawk instances, same seed, each with its own `sync_relay.html` tab open, real playthrough) for 15-20 minutes of actual play rather than a single spot-check, watching for: cross-instance `checksSeen` convergence after visiting different scouted locations; the reset-sticks behavior (create the room, set bit 0 on both instances, reset via `admin/host_admin.html`, confirm both instances' `checksSeen` actually stays cleared via the epoch mechanism rather than bouncing back); dropped events (compare each instance's real acquired items against what appears in `tracker/event_feed.html`); any RAM/gameplay corruption from the `writeChecksSeen` fold-back (compare in-game hint behavior against the single-player `ref/multiworld` behavior — hints should never regress or show corrupted text); and **confirm no audible sound stutter** occurs at any point — the entire reason the file-relay + browser-relay-page architecture (Task 13's finding) replaced the original direct-HTTP design.
 
 - [ ] **Step 4: Commit**
 

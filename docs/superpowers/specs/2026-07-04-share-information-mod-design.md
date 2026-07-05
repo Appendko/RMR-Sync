@@ -22,10 +22,11 @@ Both features ship together in v1 since they share the same backend, session key
 - **Share level** (`checksSeen` only vs. `checksSeen+items`): a single **per-room** setting, not per-player, set once when the room is created.
 - **Host duties are separated from gameplay entirely.** There is no `role = host|client` branching in the Lua script — every player runs the *identical* companion script and config (only `player_name` differs). Room lifecycle — create room (set mode), reset (clear state for a re-run), view status (mode, connected count, event count) — is handled by a **separate admin webpage**, run by whoever is organizing the session, independent of BizHawk. This avoids exposing room-admin actions to players' game clients and means one player accidentally misconfiguring `role` can't disrupt the room.
 - **Backend**: Cloudflare Worker + **Durable Objects** (one DO instance per room/seed). A DO gives single-threaded consistency for the OR-merge (no lost updates from concurrent writes) and can hold live WebSocket connections for the browser tracker. Cloudflare's free plan includes a Durable Objects allowance (SQLite-backed), which should be sufficient at this scale — confirm current free-tier limits when setting up the Worker.
-- **Transport differs per client type**, because BizHawk Lua has no WebSocket client and the admin page needs simple request/response:
-  - Game-side (Lua) ↔ Worker: plain **HTTP** (`comm.httpPostAsync`/`httpGetAsync`), polled on a timer. This is a documented part of BizHawk's Lua `comm` API, but should be double-checked against the target BizHawk version during implementation since the ref scripts have never exercised it.
+- **Game-side networking is relayed through a browser page, not done directly in Lua — confirmed necessary by empirical spike, not assumed.** A live BizHawk 2.11 test found that `comm.httpGet`/`comm.httpPost` both **block the emulation thread** (audible sound stutter on every call), and a full enumeration of the `comm` Lua table (`for k,v in pairs(comm) do ... end`) confirmed **no async HTTP variant exists at all** in this BizHawk build — so there is no way to call the Worker directly from Lua without stuttering the game on every poll. (A related dead end: `comm.httpSetGetUrl`/`httpSetPostUrl` cannot initialize BizHawk's HTTP subsystem from Lua alone — it throws a `NullReferenceException` unless BizHawk was launched with `--url_get=<pattern> --url_post=<pattern>` command-line flags, which is undesirable to require of every player anyway.) Since direct Lua HTTP is off the table entirely, **BizHawk needs no special launch flags at all** — `share_info.lua` never touches `comm.http*`.
+  - Game-side (Lua) ↔ local files: `share_info.lua` writes an **outbox** file (`rmrsync_out.json`, next to `boot.lua`) describing its pending sync/event request, and reads an **inbox** file (`rmrsync_in.json`) for the response. Plain blocking `io.open`/`write`/`close`, matching the existing progress tracker's file-I/O convention exactly (bare relative filenames, no atomic rename — `os.rename`/`os.remove` appear nowhere in `ref/` and aren't relied on here either). Fast, local-only, no network stutter.
+  - Local files ↔ Worker: a small **browser relay page** (`tracker/sync_relay.html`), opened once by each player, does the real networking. It uses the **File System Access API** (`showDirectoryPicker`, `createWritable`) to read/write those same two files in the game folder (one-time folder-access grant, persisted across reloads via IndexedDB), and plain `fetch()` to call `/sync`/`/event` on the Worker. Chromium-only (Chrome/Edge/Brave) — Firefox/Safari don't support the writable side of this API — an accepted tradeoff since it's one browser tab a player already needs open, not a second process/runtime to install.
   - Admin page ↔ Worker: plain **HTTP** `fetch()`. Unlike WebSocket, this *is* subject to CORS, so the Worker must respond with `Access-Control-Allow-Origin` (and handle the `OPTIONS` preflight a JSON POST triggers) on the admin and player endpoints alike — a small, well-understood addition, not an architectural blocker.
-  - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS, so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed.
+  - Browser tracker ↔ Worker: real **WebSocket**, for instant event-feed updates. WebSocket connections are not subject to CORS, so a locally-opened HTML file can connect to a `wss://` endpoint with no special headers needed. Unaffected by the relay redesign — it stays a separate, read-only, any-browser page so spectators without folder-write needs (or on non-Chromium browsers) can still watch.
 - **Tracker and admin page hosting**: static local HTML files (same pattern as the existing `index.html` displayer), opened directly — no deploy pipeline for v1.
 - **Hosting model: a default shared instance, but "bring your own backend" is fully supported.** Technically one Worker deployment can serve unlimited independent rooms — each room key (`param`) maps to its own isolated Durable Object instance via `idFromName`, so unrelated groups on different seeds never interact even on a shared Worker. Practically, a single publicly-shared instance risks exhausting Cloudflare's free-tier daily request cap if adoption grows, and makes one person's account a single point of failure for everyone. So: the maintainer hosts a default instance for convenience (zero-setup for casual users), but `worker_url` remains a plain config value in both `share_config.txt` and the admin page — any group can deploy their own Worker (see `worker/README.md`) and point their own config at it, with no code changes needed. This matters in particular because the default instance is not guaranteed to stay up long-term (the maintainer may repurpose their Cloudflare account later).
 - **Admin secret, separate from the room key.** The room key (Option string) can't be treated as a secret in practice — it's shown on-screen in-game, so anyone watching a stream sees it, not just the players. That means it reaches a much wider audience than intended (tracker viewers, stream chat), so it can't also be the thing that authorizes destructive admin actions. The organizer picks a separate **admin secret** when creating the room (via `host_admin.html`); the Worker stores it and requires it on `POST /admin/reset`. Knowing the room key alone (enough to sync as a player or watch the tracker) is not enough to reset a room.
@@ -43,15 +44,16 @@ Admin (organizer, no BizHawk)        Cloudflare                  Browser (any pl
 │ status           │  (CORS-enabled) │  Durable      │◄────────►│ ?room=<param>│
 └─────────────────┘                 │  Object       │          └──────────────┘
                                      │  (1 per room, │
-BizHawk (every player, identical)   │  keyed by     │
-┌─────────────────┐                 │  sessionSave  │
-│ boot.lua         │  reads RAM      │  .param)      │
-│ (untouched)      │◄───────┐       │               │
-│                  │        │       │               │
-│ share_info.lua   │────────┘       │               │
-│ (new companion)  │  HTTP POST/GET │               │
-│ reads config.txt │────────────────►               │
-└─────────────────┘  comm.http*     └──────────────┘
+BizHawk (every player, identical)   │  keyed by     │          Browser (every player)
+┌─────────────────┐                 │  sessionSave  │          ┌──────────────────┐
+│ boot.lua         │  reads RAM      │  .param)      │  fetch() │ sync_relay.html   │
+│ (untouched)      │◄───────┐       │               │◄─────────│ (File System      │
+│                  │        │       │               │          │  Access API)      │
+│ share_info.lua   │────────┘       └──────────────┘          └──────────────────┘
+│ (new companion)  │  local files only:                                ▲
+│ reads config.txt │  rmrsync_out.json (Lua→browser)                   │
+└─────────────────┘  rmrsync_in.json  (browser→Lua) ───────────────────┘
+                      (same folder as boot.lua, no comm.http* at all)
 ```
 
 ## Backend (Cloudflare Worker + Durable Object)
@@ -65,7 +67,7 @@ Admin (called by `host_admin.html`, needs CORS headers + `OPTIONS` preflight han
 - `POST /admin/reset` — body `{adminSecret}`; clears `checksSeen` and the event log (for starting a fresh run on the same room), increments `resetEpoch`, keeps `mode`. Rejected (403) if `adminSecret` is missing or doesn't match what was set at creation.
 - `GET /admin/status` — returns `mode`, a summary of `checksSeen`, event count, and connected WebSocket count. No secret required — read-only, and the counts aren't sensitive.
 
-Player (called by `share_info.lua` via `comm.http*`, no browser/CORS involved):
+Player (called by the browser relay page, `tracker/sync_relay.html`, via `fetch()` — CORS-enabled like the admin endpoints, since it's not BizHawk calling these directly anymore):
 - `POST /sync` — body `{checksSeen, epoch}` → OR-merges into room state and responds with the fully merged bytes **only if the client's `epoch` matches or is ahead of the room's `resetEpoch`**; a client reporting an older epoch has its contribution discarded (protects a freshly reset room from being silently re-populated by a client that hasn't caught up yet), and just gets the current state + current epoch back so it can catch up. Covers both push and pull in one round trip, mirroring `boot.lua`'s own `synchronize_or` pattern one level up (device → server → device). Fails clearly (409) if the room hasn't been created yet (host must run `/admin/init` first).
 - `POST /event` — body: `{player, game, items[]}` → appended to the log and broadcast to all connected WebSocket clients. Only accepted if `mode` includes items.
 
@@ -76,10 +78,19 @@ Tracker (browser, WebSocket, no CORS applicable):
 
 Loaded after `boot.lua`, following the same convention as the existing tracker script ("load this script after loading RMR boot.lua"). Every player runs the identical script and logic — only `share_config.txt`'s `player_name` differs between them. Config: `player_name`, `worker_url`. (`share_mode` is not part of player config — it's set once, room-wide, via the admin page.)
 
-Main loop, polled every few seconds (matching the existing tracker's `cWaitFrames`-style cadence):
-1. If the room is not yet confirmed to exist (i.e. no admin has run `/admin/init` yet), poll and show a waiting message (via the existing `Text.out` helper) until it does.
-2. Read local `checksSeen` bytes from RAM, `POST /sync` along with the script's last-known `resetEpoch`. If the response's epoch is newer than what the script knew about (a reset happened), directly **overwrite** local `checksSeen` (both `sessionSave.checksSeen` and the current title's live RAM) with the server's response instead of the usual OR fold-back, so the reset actually sticks rather than being silently undone by still-cached local bits. Otherwise, fold back with OR as before — the same style as `updateSaveValue`'s `synchronize_or` in `boot.lua`.
-3. If the room's `mode` (learned from the `/sync` response) includes items: diff current vs. previous items snapshot (same acquired-item detection approach as `boot.lua`'s `acquiredItemInfo` / `RMR_progress_tracker.lua`'s diffing) and `POST /event` for newly-acquired items.
+Talks to the Worker only indirectly, through two local files living next to `boot.lua` (see "Game-side networking" above): an outbox `rmrsync_out.json` it writes, and an inbox `rmrsync_in.json` it reads. Each outbox document carries a per-session random id and a monotonically increasing sequence number, so the script only acts on the inbox response matching its current outstanding request (guards against a stale leftover response from a previous BizHawk run, or from before the relay page caught up).
+
+Main loop, frame-gated at roughly the same cadence as the existing tracker's `cWaitFrames` pattern (~1.5s; safe to poll this often since it's pure local file I/O now, no network stutter):
+1. Read any pending inbox response. If it matches the currently outstanding request: fold the result in (see epoch handling below), and if the mode includes items, clear the just-acknowledged batch of pending events.
+2. If no request is currently outstanding, build and write a new outbox document: current local `checksSeen` bytes from RAM, the script's last-known `resetEpoch`, and (mode permitting) any newly-diffed item pickups since the last acknowledged batch.
+3. Epoch handling, same semantics as before: if the inbox response's epoch is newer than what the script last knew, directly **overwrite** local `checksSeen` (both `sessionSave.checksSeen` and the current title's live RAM) with the server's merged bytes instead of the usual OR fold-back, so a reset actually sticks. Otherwise, fold back with OR as before — the same style as `updateSaveValue`'s `synchronize_or` in `boot.lua`.
+4. If no relay page has picked up the outbox for several cycles (nothing answers), show a waiting message (via the existing `Text.out` helper) prompting the player to open `sync_relay.html`, and keep the request outstanding so the relay can still pick it up whenever it starts.
+
+## Browser relay page (`tracker/sync_relay.html`)
+
+A small page each player opens once, alongside the game — separate from the read-only, any-browser `event_feed.html` tracker so spectators never need folder-write permission. On first use, the player clicks a button to grant folder access (`showDirectoryPicker`) to the folder containing `boot.lua`/`share_info.lua`; the granted handle is persisted in IndexedDB so future page loads only need a permission re-confirmation, not a fresh folder pick. It needs no manual configuration of worker URL, room key, or player name — those are read straight out of the outbox file, which `share_info.lua` already populates from `share_config.txt` and the session's room key.
+
+On a timer (~1.5s), it: reads the outbox file (tolerating a torn read from Lua's non-atomic write by treating a JSON-parse failure as "nothing new this tick"); if there's an unhandled request (by session+sequence), calls `POST /sync` and any batched `POST /event` calls against the Worker; and writes the result back to the inbox file using `createWritable()`, which is atomic-on-close in Chromium — so `share_info.lua` never observes a torn inbox file.
 
 ## Admin webpage (`admin/host_admin.html`)
 
@@ -98,7 +109,10 @@ RMR_sync/
 ├── .gitignore              # ignores /ref
 ├── README.md
 ├── lua/
-│   └── share_info.lua      # companion script (identical for every player)
+│   ├── share_info.lua      # companion script (identical for every player)
+│   ├── file_relay.lua      # outbox/inbox file I/O + JSON (no BizHawk-specific deps)
+│   ├── config.lua          # share_config.txt loader
+│   └── json.lua            # JSON encode/decode
 ├── worker/                 # Cloudflare Worker + Durable Object source
 │   ├── src/index.js
 │   ├── wrangler.toml
@@ -106,15 +120,17 @@ RMR_sync/
 ├── admin/
 │   └── host_admin.html     # organizer-only room create/reset/status page
 ├── tracker/
-│   ├── event_feed.html
-│   └── event_feed.js
+│   ├── event_feed.html     # read-only live event feed (any browser, no file access)
+│   ├── event_feed.js
+│   ├── sync_relay.html     # per-player relay: local files <-> Worker (Chromium only)
+│   └── sync_relay.js
 └── config/
     └── share_config.example.txt
 ```
 
 ## Open items to verify during implementation
 
-- Confirm `comm.httpPostAsync`/`httpGetAsync` (or equivalent) are actually available and reliable in the target BizHawk build/Faust core combination — the ref scripts have never used networking, so this is unverified against this specific setup.
+- ~~Confirm `comm.httpPostAsync`/`httpGetAsync` (or equivalent) are actually available and reliable in the target BizHawk build/Faust core combination.~~ **Resolved by empirical spike, and it changed the design**: a live BizHawk 2.11 session confirmed `comm.httpGet`/`comm.httpPost` both block the emulation thread (audible stutter every call) and no async variant exists at all (confirmed via full `pairs(comm)` enumeration). Direct Lua HTTP was dropped entirely in favor of the local-file + browser-relay-page architecture described above — see "Game-side networking" under Key decisions.
 - ~~Confirm current Cloudflare Durable Objects free-tier limits at time of deploy.~~ **Confirmed working** via a real deploy (`worker/` — throwaway test Worker + Durable Object, `rmr-share-test.append-rmr.workers.dev`): free plan requires the **SQLite-backed** storage backend, i.e. `new_sqlite_classes` in the `[[migrations]]` block of `wrangler.toml`, not the older `new_classes` (which needs a paid plan). Storage persistence across requests verified directly (a counter incremented correctly over repeated calls). One practical gotcha hit along the way, worth remembering for any future account: after claiming/changing your `*.workers.dev` account subdomain, HTTPS to it can fail with `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` for a few minutes while Cloudflare provisions the certificate for the new subdomain — this resolves on its own; no action needed beyond waiting.
 
 ## Appendix: room-key verification
@@ -133,6 +149,9 @@ This isn't needed for the mod itself — `spoiler.txt` is simpler and available 
 
 - **Worker/DO**: local `wrangler dev` testing of `/admin/init`, `/admin/reset`, `/admin/status`, `/sync` (OR-merge correctness with concurrent-ish requests, and epoch-based rejection of stale clients), `/event`, CORS preflight handling on admin endpoints, the WebSocket upgrade + broadcast path, and alarm-based 24h expiry (triggered directly in tests rather than waiting 24h for real), before deploying.
 - **Admin page**: create a room, confirm players' `/sync` calls fail clearly before creation and succeed after; confirm `/admin/reset` requires the correct admin secret and clears state without needing to touch any player's game.
-- **Lua script**: run two BizHawk instances (both running the identical script, different `player_name`) against the same seed, confirm `checksSeen` converges identically on both sides after visiting different scouted locations, confirm they wait gracefully if the admin hasn't created the room yet, and confirm that after an admin reset, a still-running player's `checksSeen` actually stays cleared (via the epoch mechanism) rather than bouncing back on its next sync.
+- **Lua file-relay module**: standalone-Lua-interpreter tests (same approach as `json.lua`) for outbox writing and inbox reading, including torn/garbage-input tolerance (returns `nil`, doesn't crash).
+- **Companion script logic**: standalone-Lua unit tests against fabricated inbox documents — epoch-ahead triggers overwrite not OR-fold, events clear only when acknowledged, a stale session/sequence in the inbox is ignored.
+- **Browser relay page**: tested against the real deployed Worker (same approach as Tasks 9/11) — hand-write an outbox file into a scratch folder, confirm the page performs the correct `/sync`/`/event` calls and writes a correct inbox response; confirm the folder handle survives a page reload via IndexedDB.
+- **Lua script + relay, live**: run two BizHawk instances (both running the identical script, different `player_name`), each with its own `sync_relay.html` tab, against the same seed. Confirm `checksSeen` converges identically on both sides after visiting different scouted locations, confirm they wait gracefully (and recover) if the relay page isn't open yet, and confirm that after an admin reset, a still-running player's `checksSeen` actually stays cleared (via the epoch mechanism) rather than bouncing back on its next sync. Confirm no audible stutter — the entire point of the file-relay pivot.
 - **Tracker page**: open `event_feed.html?room=<param>` in a browser while both BizHawk instances play, confirm live event updates appear with correct icons in both display modes, and confirm a late-opened tracker backfills the existing log.
-- **End-to-end**: two players, same seed, real playthrough for ~15–20 minutes, checking for dropped events, RAM corruption from bad writes, and reasonable HTTP polling overhead.
+- **End-to-end**: two players, same seed, real playthrough for ~15–20 minutes, checking for dropped events, RAM corruption from bad writes, and reasonable end-to-end sync latency.
