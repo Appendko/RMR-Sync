@@ -91,8 +91,18 @@ local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
 
+-- Lua console only (not Text.out/on-screen) -- an on-screen overlay redrawn
+-- only once per poll cycle (every ~1.5s) reads as a flicker rather than a
+-- steady HUD element. Only print when the message actually changes, so a
+-- routine successful sync doesn't spam the console every cycle -- only a
+-- genuinely new state (a different epoch, a new error, a new wait state)
+-- produces a new line.
+local lastStatusText = nil
 local function statusLine(text)
-    Text.out(16, 32, "share_info: " .. text, ew.RGB(255, 255, 0), ew.RGBA(0, 0, 0, 192))
+    if text ~= lastStatusText then
+        print("share_info: " .. text)
+        lastStatusText = text
+    end
 end
 
 local function tryConsumeInbox()
