@@ -67,6 +67,19 @@ if not cfg then
     error("share_info.lua: " .. cfgErr)
 end
 
+-- The room key (Option string) commonly contains "#" and "+", which are
+-- special characters in a URL query string ("#" starts a fragment, cutting
+-- the query short if pasted in raw) -- percent-encode it here so players can
+-- copy a working tracker link straight out of the Lua console instead of
+-- hand-encoding it themselves.
+local function urlEncode(str)
+    return (str:gsub("[^%w_%-%.~]", function(c)
+        return string.format("%%%02X", c:byte())
+    end))
+end
+
+print("RMR Sync: tracker link query suffix: ?room=" .. urlEncode(sessionSave.param))
+
 math.randomseed(os.time())
 local session = string.format("%06x", math.random(0, 0xFFFFFF))
 local seq = 0
