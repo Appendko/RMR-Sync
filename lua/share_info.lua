@@ -37,7 +37,11 @@ end
 -- are still sitting there from before the reset.
 local function writeChecksSeen(merged, forceOverwrite)
     for i = 0, 95 do
-        sessionSave.checksSeen[i] = merged[i + 1]
+        if forceOverwrite then
+            sessionSave.checksSeen[i] = merged[i + 1]
+        else
+            sessionSave.checksSeen[i] = (sessionSave.checksSeen[i] or 0) | merged[i + 1]
+        end
     end
     local title = currentTitle()
     local baseOffset = (title - 1) * cChecksPerTitle
