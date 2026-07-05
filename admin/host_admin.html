@@ -25,7 +25,7 @@
 <label for="adminSecret">Admin secret (yours alone — do not share, do not show on stream)</label>
 <input id="adminSecret" type="password" placeholder="choose a private password for this room" />
 
-<label for="mode">Share mode (used only when creating the room)</label>
+<label for="mode">Share mode (used when creating or resetting the room)</label>
 <select id="mode">
   <option value="checksSeen">checksSeen only</option>
   <option value="checksSeen+items">checksSeen + items</option>
@@ -34,6 +34,7 @@
 <button id="createBtn">Create Room</button>
 <button id="resetBtn">Reset Room</button>
 <button id="refreshBtn">Refresh Status</button>
+<button id="deleteBtn">Delete Room</button>
 
 <div id="status">No status yet.</div>
 
@@ -77,13 +78,32 @@ async function resetRoom() {
     const res = await fetch(getRoomUrl("/admin/reset"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        adminSecret: document.getElementById("adminSecret").value,
+        mode: document.getElementById("mode").value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    showStatus(`Room reset. Mode: ${data.mode}`, false);
+  } catch (err) {
+    showStatus(`Reset failed: ${err.message}`, true);
+  }
+}
+
+async function deleteRoom() {
+  if (!confirm("Delete this room? This cannot be undone.")) return;
+  try {
+    const res = await fetch(getRoomUrl("/admin/delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ adminSecret: document.getElementById("adminSecret").value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    showStatus("Room reset.", false);
+    showStatus("Room deleted.", false);
   } catch (err) {
-    showStatus(`Reset failed: ${err.message}`, true);
+    showStatus(`Delete failed: ${err.message}`, true);
   }
 }
 
@@ -107,6 +127,7 @@ async function refreshStatus() {
 document.getElementById("createBtn").addEventListener("click", createRoom);
 document.getElementById("resetBtn").addEventListener("click", resetRoom);
 document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
+document.getElementById("deleteBtn").addEventListener("click", deleteRoom);
 </script>
 </body>
 </html>

@@ -30,6 +30,9 @@ export class RoomDO {
     if (path === "/admin/reset" && request.method === "POST") {
       return this.handleReset(request);
     }
+    if (path === "/admin/delete" && request.method === "POST") {
+      return this.handleDelete(request);
+    }
     if (path === "/sync" && request.method === "POST") {
       return this.handleSync(request);
     }
@@ -91,12 +94,33 @@ export class RoomDO {
     if (!body || body.adminSecret !== storedSecret) {
       return jsonResponse({ error: "invalid admin secret" }, 403);
     }
+    if (body.mode !== undefined && !isValidMode(body.mode)) {
+      return jsonResponse({ error: "invalid mode" }, 400);
+    }
+    const newMode = body.mode !== undefined ? body.mode : mode;
     const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
     await this.state.storage.put("resetEpoch", currentEpoch + 1);
+    await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.scheduleExpiry();
-    return jsonResponse({ ok: true });
+    return jsonResponse({ ok: true, mode: newMode });
+  }
+
+  async handleDelete(request) {
+    const mode = await this.state.storage.get("mode");
+    if (!mode) {
+      return jsonResponse({ error: "room not initialized" }, 409);
+    }
+    const body = await request.json().catch(() => null);
+    const storedSecret = await this.state.storage.get("adminSecret");
+    if (!body || body.adminSecret !== storedSecret) {
+      return jsonResponse({ error: "invalid admin secret" }, 403);
+    }
+    await this.state.storage.deleteAlarm();
+    await this.state.storage.deleteAll();
+    this.sockets.clear();
+    return jsonResponse({ deleted: true });
   }
 
   async handleSync(request) {

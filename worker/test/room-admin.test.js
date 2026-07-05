@@ -64,7 +64,7 @@ describe("RoomDO admin lifecycle", () => {
     const stub = getStub("test-room-reset-1");
     await postJson(stub, "/admin/init", { mode: "checksSeen+items", adminSecret: "s3cr3t" });
     const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t" });
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+items" });
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status).toEqual({ mode: "checksSeen+items", checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
   });
@@ -83,6 +83,68 @@ describe("RoomDO admin lifecycle", () => {
   it("rejects reset attempted before the room is initialized", async () => {
     const stub = getStub("test-room-reset-3");
     const res = await postJson(stub, "/admin/reset", { adminSecret: "anything" });
+    expect(res.status).toBe(409);
+  });
+
+  it("changes the stored mode when reset is given a valid new mode", async () => {
+    const stub = getStub("test-room-reset-mode-1");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t", mode: "checksSeen+items" });
+    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+items" });
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.mode).toBe("checksSeen+items");
+  });
+
+  it("rejects reset with an invalid mode and leaves state untouched", async () => {
+    const stub = getStub("test-room-reset-mode-2");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t", mode: "not-a-real-mode" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid mode" });
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status).toEqual({ mode: "checksSeen", checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
+  });
+
+  it("rejects reset with the wrong admin secret even if a valid mode is provided", async () => {
+    const stub = getStub("test-room-reset-mode-3");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "correct-secret" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "wrong-secret", mode: "checksSeen+items" });
+    expect(res.status).toBe(403);
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.mode).toBe("checksSeen");
+  });
+
+  it("fully wipes a room on delete, given the correct admin secret", async () => {
+    const stub = getStub("test-room-delete-1");
+    await postJson(stub, "/admin/init", { mode: "checksSeen+items", adminSecret: "s3cr3t" });
+    const res = await postJson(stub, "/admin/delete", { adminSecret: "s3cr3t" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status).toEqual({ mode: null, checksSeenBitsSet: 0, eventCount: 0, connected: 0 });
+
+    const initRes = await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "new-secret" });
+    expect(await initRes.json()).toEqual({ mode: "checksSeen", created: true });
+  });
+
+  it("rejects delete with a missing or wrong admin secret and does not wipe storage", async () => {
+    const stub = getStub("test-room-delete-2");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "correct-secret" });
+
+    const wrongRes = await postJson(stub, "/admin/delete", { adminSecret: "wrong-secret" });
+    expect(wrongRes.status).toBe(403);
+
+    const missingRes = await stub.fetch("https://do/admin/delete", { method: "POST" });
+    expect(missingRes.status).toBe(403);
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.mode).toBe("checksSeen");
+  });
+
+  it("rejects delete attempted before the room is initialized", async () => {
+    const stub = getStub("test-room-delete-3");
+    const res = await postJson(stub, "/admin/delete", { adminSecret: "anything" });
     expect(res.status).toBe(409);
   });
 });
