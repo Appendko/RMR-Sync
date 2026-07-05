@@ -114,7 +114,7 @@ async function tick() {
 
 function startPolling() {
   if (pollHandle) clearInterval(pollHandle);
-  pollHandle = setInterval(() => { tick().catch((e) => log("Relay error: " + e)); }, 1500);
+  pollHandle = setInterval(() => { tick().catch((e) => log("Relay error: " + e)); }, 400);
   log("Connected. Watching for sync requests...");
 }
 

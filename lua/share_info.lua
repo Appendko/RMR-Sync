@@ -13,7 +13,8 @@ local cChecksPerTitle = 0x20
 local addrChecksSeen = 0x7FFF80
 local addrItems = 0x7FFF00
 local cItems = 0x60
-local cWaitFrames = 90 -- ~1.5s at 60fps; safe to poll this often now -- pure local file I/O, no network stutter
+local cWaitFrames = 60 -- ~1s at 60fps: routine heartbeat (pulls others' checksSeen updates even with no local changes)
+local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-acquired items; can trigger an early outbox write ahead of the heartbeat
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -90,6 +91,7 @@ local previousItems = nil
 local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
+local itemCheckFrames = 0
 
 -- Lua console only (not Text.out/on-screen) -- an on-screen overlay redrawn
 -- only once per poll cycle (every ~1.5s) reads as a flicker rather than a
@@ -125,17 +127,6 @@ local function tryConsumeInbox()
 end
 
 local function issueRequest()
-    if shareMode == "checksSeen+items" then
-        local items = readItems()
-        if previousItems then
-            local acquired = ShareLogic.diffNewBits(previousItems, items)
-            if #acquired > 0 then
-                table.insert(pendingEvents, { game = currentTitle(), items = acquired })
-            end
-        end
-        previousItems = items
-    end
-
     seq = seq + 1
     outstandingSeq = seq
     Relay.writeOutbox({
@@ -149,7 +140,35 @@ local function issueRequest()
     })
 end
 
+-- Checked far more often than the routine heartbeat (see cItemCheckFrames) since
+-- this is just a cheap RAM read/diff, no I/O. The moment a new item is detected,
+-- fire a fresh outbox write immediately rather than waiting for the next
+-- heartbeat cycle -- this is what makes item-pickup events show up quickly.
+-- Safe to supersede an already-outstanding request: the old request's eventual
+-- (now-stale) response will be ignored by ShareLogic.isResponseFor, since its
+-- seq will no longer match the new outstandingSeq this function just set.
+local function checkForNewItems()
+    if shareMode ~= "checksSeen+items" then
+        return
+    end
+    local items = readItems()
+    if previousItems then
+        local acquired = ShareLogic.diffNewBits(previousItems, items)
+        if #acquired > 0 then
+            table.insert(pendingEvents, { game = currentTitle(), items = acquired })
+            issueRequest()
+        end
+    end
+    previousItems = items
+end
+
 while true do
+    itemCheckFrames = itemCheckFrames - 1
+    if itemCheckFrames <= 0 then
+        itemCheckFrames = cItemCheckFrames
+        checkForNewItems()
+    end
+
     waitFrames = waitFrames - 1
     if waitFrames <= 0 then
         waitFrames = cWaitFrames
