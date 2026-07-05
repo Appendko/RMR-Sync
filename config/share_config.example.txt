@@ -1,0 +1,4 @@
+# Copy this file to share_config.txt (same folder as boot.lua) and fill in
+# your values before loading share_info.lua.
+player_name=YourNameHere
+worker_url=https://rmr-sync.yourname.workers.dev
