@@ -1,4 +1,4 @@
-export const ITEM_ID_MAP = {
+const ITEM_ID_MAP = {
   0: "1ItLifeUp1", 1: "1ItLifeUp2", 2: "1ItLifeUp3", 3: "1ItLifeUp4",
   4: "1ItLifeUp5", 5: "1ItLifeUp6", 6: "1ItLifeUp7", 7: "1ItLifeUp8",
   8: "1ItLifeUpD1", 9: "1ItLifeUpD2", 10: "1ItLifeUpD3", 11: "1ItLifeUpD4",

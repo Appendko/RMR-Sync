@@ -1,5 +1,3 @@
-import { ITEM_ID_MAP } from "./item_id_map.mjs";
-
 const GENERIC_ICON = "assets/x.png";
 
 // Verified against ref/multiworld/lua/itemName.lua's English boss names.
@@ -30,7 +28,7 @@ const SIMPLE_RULES = [
   { pattern: /^3ItSaber$/, file: "assets/x3_x_saber.png" },
 ];
 
-export function getIconInfo(idString) {
+function getIconInfo(idString) {
   const label = labelFor(idString);
 
   for (const rule of SIMPLE_RULES) {
@@ -69,7 +67,7 @@ function labelFor(idString) {
   return match ? match[1] : idString;
 }
 
-export function getIconInfoForId(numericId) {
+function getIconInfoForId(numericId) {
   const idString = ITEM_ID_MAP[numericId];
   if (!idString) {
     return { file: GENERIC_ICON, label: String(numericId) };

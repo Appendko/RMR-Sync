@@ -1,5 +1,3 @@
-import { getIconInfoForId } from "./icon_map.mjs";
-
 function getRoomFromQuery() {
   return new URLSearchParams(window.location.search).get("room");
 }

@@ -1,6 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getIconInfo, getIconInfoForId } from "./icon_map.mjs";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+// icon_map.js and item_id_map.js are classic (non-module) browser scripts
+// loaded via two <script> tags sharing one global scope (see event_feed.html).
+// We faithfully mirror that loading mechanism here using vm, rather than
+// importing them as ES modules.
+const dir = path.dirname(fileURLToPath(import.meta.url));
+const context = {};
+vm.createContext(context);
+vm.runInContext(readFileSync(path.join(dir, "item_id_map.js"), "utf8"), context);
+vm.runInContext(readFileSync(path.join(dir, "icon_map.js"), "utf8"), context);
+const { getIconInfo, getIconInfoForId } = context;
 
 test("maps generic categories regardless of game", () => {
   assert.equal(getIconInfo("1ItLifeUp1").file, "assets/heart.png");
