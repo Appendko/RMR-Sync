@@ -12,6 +12,7 @@ require "config"
 local cChecksPerTitle = 0x20
 local addrChecksSeen = 0x7FFF80
 local addrItems = 0x7FFF00
+local addrLastProgressFrame = 0x7E0244
 local cItems = 0x60
 local cWaitFrames = 60 -- ~1s at 60fps: routine heartbeat (pulls others' checksSeen updates even with no local changes)
 local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-acquired items; can trigger an early outbox write ahead of the heartbeat
@@ -88,6 +89,7 @@ local outstandingSeq = nil
 local pendingEvents = {}
 local shareMode = nil
 local previousItems = nil
+local previousProgressFrame = nil
 local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
@@ -151,6 +153,14 @@ local function checkForNewItems()
     if shareMode ~= "checksSeen+items" then
         return
     end
+    local progressFrame = cpu2[addrLastProgressFrame]
+    if previousProgressFrame == progressFrame then
+        return -- no real in-game progress since the last check; skip the diff entirely,
+               -- matching boot.lua's own gating (raw item bytes aren't stable between
+               -- real progress events, so diffing them unconditionally causes false positives)
+    end
+    previousProgressFrame = progressFrame
+
     local items = readItems()
     if previousItems then
         local acquired = ShareLogic.diffNewBits(previousItems, items)
