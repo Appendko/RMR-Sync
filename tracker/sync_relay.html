@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RMR Sync — Relay</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 2em auto; }
+  #status { white-space: pre-wrap; background: #f0f0f0; padding: 1em; border-radius: 4px; }
+  button { font-size: 1em; padding: 0.5em 1em; margin-right: 0.5em; }
+</style>
+</head>
+<body>
+<h1>RMR Sync — Relay</h1>
+<p>
+  Keep this tab open while you play. It reads your game's local sync files
+  and relays them to the Cloudflare backend — no other setup needed beyond
+  picking the folder that contains <code>boot.lua</code> once.
+  Requires Chrome, Edge, or another Chromium-based browser.
+</p>
+<button id="pickBtn">Choose game folder</button>
+<button id="reconnectBtn" style="display:none">Reconnect folder</button>
+<div id="status">Not connected.</div>
+<script src="sync_relay.js"></script>
+</body>
+</html>
