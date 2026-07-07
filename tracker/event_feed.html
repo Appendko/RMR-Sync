@@ -9,12 +9,13 @@
   h1 { font-size: 1.2rem; }
   #controls { margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; }
   #log { display: flex; flex-direction: column; gap: 0.4rem; }
-  .entry { display: flex; align-items: center; gap: 0.4rem; background: #222; padding: 0.4rem 0.6rem; border-radius: 4px; }
+  .entry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; background: #222; padding: 0.4rem 0.6rem; border-radius: 4px; }
   .entry .player { font-weight: bold; margin-right: 0.4rem; }
-  .entry img { width: 24px; height: 24px; image-rendering: pixelated; }
+  .entry img { width: 24px; height: 24px; flex-shrink: 0; image-rendering: pixelated; }
   .entry .icon-sprite {
     width: 24px;
     height: 24px;
+    flex-shrink: 0;
     background-image: url("assets/item_icon_sheet.png");
     background-repeat: no-repeat;
     background-size: 192px 1344px;

@@ -9,6 +9,17 @@ function toWebSocketUrl(workerUrl, room) {
 }
 
 function renderEntry(event, showText) {
+  // Some newly-set bits in the game's item-memory region don't correspond to a
+  // real, named item (e.g. check/progress-tracking bits that happen to live in
+  // the same memory range) -- ITEM_ID_MAP has no entry for those ids. Treat
+  // them as "not really an item": don't show an icon/label for them, and don't
+  // render an entry line at all if every item in this event turns out to be one
+  // of these unnamed bits.
+  const realItems = event.items.filter((itemId) => ITEM_ID_MAP[itemId] !== undefined);
+  if (realItems.length === 0) {
+    return null;
+  }
+
   const entry = document.createElement("div");
   entry.className = "entry";
 
@@ -17,7 +28,7 @@ function renderEntry(event, showText) {
   player.textContent = `${event.player}:`;
   entry.appendChild(player);
 
-  for (const itemId of event.items) {
+  for (const itemId of realItems) {
     const spritePos = getSpritePositionForId(itemId);
     const label = getIconInfoForId(itemId).label;
     if (spritePos) {
@@ -57,7 +68,10 @@ function main() {
   function renderAll() {
     log.innerHTML = "";
     for (const event of allEvents) {
-      log.appendChild(renderEntry(event, showTextCheckbox.checked));
+      const el = renderEntry(event, showTextCheckbox.checked);
+      if (el) {
+        log.appendChild(el);
+      }
     }
   }
 
@@ -93,8 +107,11 @@ function main() {
       renderAll();
     } else if (data.type === "event") {
       allEvents.push(data.event);
-      log.appendChild(renderEntry(data.event, showTextCheckbox.checked));
-      log.scrollTop = log.scrollHeight;
+      const el = renderEntry(data.event, showTextCheckbox.checked);
+      if (el) {
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+      }
     }
   });
 }
