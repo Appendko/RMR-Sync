@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RMR Sync — Icon Audit (diagnostic, not player-facing)</title>
+<style>
+  body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+  h1 { font-size: 1.2rem; }
+  p.note { font-size: 0.85rem; color: #999; }
+  #controls { margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  #controls input[type="text"] { padding: 0.3rem 0.5rem; font-size: 0.95rem; min-width: 220px; }
+  #stats { font-size: 0.85rem; color: #999; margin-bottom: 0.8rem; }
+  table { border-collapse: collapse; width: 100%; }
+  thead th { text-align: left; position: sticky; top: 0; background: #111; border-bottom: 1px solid #444; padding: 0.4rem 0.6rem; font-size: 0.85rem; color: #ccc; }
+  tbody tr { border-bottom: 1px solid #222; }
+  tbody tr.flagged { background: #332200; }
+  tbody tr.no-mapping td.sprite-cell { color: #f88; }
+  tbody tr.hidden { display: none; }
+  td { padding: 0.4rem 0.6rem; vertical-align: middle; font-size: 0.9rem; }
+  td.id-cell { width: 3.5rem; color: #999; }
+  td.code-cell { font-family: monospace; }
+  td.icon-cell { width: 60px; }
+  .icon-box { width: 48px; height: 48px; image-rendering: pixelated; display: block; }
+  .no-mapping-placeholder {
+    width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+    font-size: 0.6rem; text-align: center; color: #f88; border: 1px dashed #822; line-height: 1;
+  }
+  .badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #553; color: #fd9; margin-left: 0.4rem; }
+</style>
+</head>
+<body>
+<h1>RMR Sync — Icon Audit</h1>
+<p class="note">
+  Standalone diagnostic page. Not linked from the player-facing UI. Compares each item's
+  CURRENTLY-shipped icon (left) against the candidate icon sliced directly out of
+  <code>ref/AutoTracker/ItemIcon.png</code> (copied here as <code>assets/item_icon_sheet.png</code>) at that
+  item's own numeric ID (right). Rows highlighted amber are already-known reused-icon bugs
+  (ItLifeS/L, ItWeaponS/L, ItFullRecover reusing the LifeUp/EnergyUp permanent-upgrade icons).
+</p>
+<div id="controls">
+  <input type="text" id="filterInput" placeholder="Filter by string code substring…" autocomplete="off" />
+  <label><input type="checkbox" id="flaggedOnly" /> Show only known-bug rows</label>
+  <label><input type="checkbox" id="flaggedFirst" /> Sort flagged rows first</label>
+</div>
+<div id="stats"></div>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>String code</th>
+      <th>Current icon (shipped)</th>
+      <th>Sprite-sliced candidate</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<script src="item_id_map.js"></script>
+<script src="icon_map.js"></script>
+<script src="icon_audit.js"></script>
+</body>
+</html>
