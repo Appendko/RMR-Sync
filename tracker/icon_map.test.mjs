@@ -14,7 +14,7 @@ const context = {};
 vm.createContext(context);
 vm.runInContext(readFileSync(path.join(dir, "item_id_map.js"), "utf8"), context);
 vm.runInContext(readFileSync(path.join(dir, "icon_map.js"), "utf8"), context);
-const { getIconInfo, getIconInfoForId } = context;
+const { getIconInfo, getIconInfoForId, getSpritePositionForId } = context;
 
 test("maps generic categories regardless of game", () => {
   assert.equal(getIconInfo("1ItLifeUp1").file, "assets/heart.png");
@@ -125,4 +125,48 @@ test("getIconInfoForId falls back to the generic icon for an ID outside the map"
   const result = getIconInfoForId(999);
   assert.equal(result.file, "assets/x.png");
   assert.equal(result.label, "999");
+});
+
+test("getSpritePositionForId computes the sprite-sheet slot for a regular (non-M) id", () => {
+  // id 74 = "1ItKeyS11". 74 % 8 = 2 -> sx = 32.
+  // floor(74/256) = 0, floor(74 % 256 / 8) = floor(74/8) = 9 -> sy = 0 + 9*16 + 128 = 272.
+  const pos = getSpritePositionForId(74);
+  assert.deepEqual({ sx: pos.sx, sy: pos.sy }, { sx: 32, sy: 272 });
+});
+
+test("getSpritePositionForId resolves an M-prefixed id to its 1-prefixed sprite equivalent", () => {
+  // id 808 = "MItWeaponLO"; its "1"-prefixed equivalent is id 40 = "1ItWeaponLO".
+  const mPos = getSpritePositionForId(808);
+  const onePos = getSpritePositionForId(40);
+  assert.deepEqual({ sx: mPos.sx, sy: mPos.sy }, { sx: onePos.sx, sy: onePos.sy });
+});
+
+test("getSpritePositionForId returns null for an id with no ITEM_ID_MAP entry", () => {
+  assert.equal(getSpritePositionForId(99999), null);
+});
+
+test("getSpritePositionForId gives ItLifeS/ItLifeL/ItFullRecover their own distinct sprite slots, unlike the old shared heart.png bug", () => {
+  // 120 = "ItLifeS", 121 = "ItLifeL", 124 = "ItFullRecover", 0 = "1ItLifeUp1".
+  // The old getIconInfo rules wrongly pointed all four at assets/heart.png; sprite-slicing
+  // uses each item's own numeric id, so they must land on different sheet positions.
+  const lifeUp = getSpritePositionForId(0);
+  const lifeS = getSpritePositionForId(120);
+  const lifeL = getSpritePositionForId(121);
+  const fullRecover = getSpritePositionForId(124);
+
+  assert.notDeepEqual({ sx: lifeS.sx, sy: lifeS.sy }, { sx: lifeUp.sx, sy: lifeUp.sy });
+  assert.notDeepEqual({ sx: lifeL.sx, sy: lifeL.sy }, { sx: lifeUp.sx, sy: lifeUp.sy });
+  assert.notDeepEqual({ sx: fullRecover.sx, sy: fullRecover.sy }, { sx: lifeUp.sx, sy: lifeUp.sy });
+});
+
+test("getSpritePositionForId gives ItWeaponS/ItWeaponL their own distinct sprite slots, unlike the old shared energy.png bug", () => {
+  // 122 = "ItWeaponS", 123 = "ItWeaponL", 16 = "1ItEnergyUp1".
+  // The old getIconInfo rules wrongly pointed both at assets/energy.png; sprite-slicing
+  // uses each item's own numeric id, so they must land on different sheet positions.
+  const energyUp = getSpritePositionForId(16);
+  const weaponS = getSpritePositionForId(122);
+  const weaponL = getSpritePositionForId(123);
+
+  assert.notDeepEqual({ sx: weaponS.sx, sy: weaponS.sy }, { sx: energyUp.sx, sy: energyUp.sy });
+  assert.notDeepEqual({ sx: weaponL.sx, sy: weaponL.sy }, { sx: energyUp.sx, sy: energyUp.sy });
 });

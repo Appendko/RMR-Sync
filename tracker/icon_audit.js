@@ -15,10 +15,11 @@
 // such "1"-equivalent exists in ITEM_ID_MAP, we show a "no sprite mapping" placeholder rather
 // than guessing.
 
-const SPRITE_SHEET_FILE = "assets/item_icon_sheet.png";
-const SPRITE_TILE_PX = 16; // native tile size in the sheet
-const SPRITE_SHEET_NATIVE_W = 128; // 8 columns * 16px
-const SPRITE_SHEET_NATIVE_H = 896; // 56 rows * 16px
+// SPRITE_SHEET_FILE / SPRITE_TILE_PX / SPRITE_SHEET_NATIVE_W / SPRITE_SHEET_NATIVE_H /
+// CODE_TO_ID / computeSpritePosition are now defined once in icon_map.js (the shared
+// source of truth), along with getSpritePositionForId which combines them with the
+// M-prefix cross-reference fallback. This file only adds its own display-scale constant
+// and the DOM-styling wrapper around that shared function.
 const DISPLAY_PX = 48; // CSS box size for both icon columns
 const SCALE = DISPLAY_PX / SPRITE_TILE_PX; // uniform upscale factor, kept proportional
 
@@ -28,33 +29,7 @@ const SCALE = DISPLAY_PX / SPRITE_TILE_PX; // uniform upscale factor, kept propo
 // SIMPLE_RULES for the current (buggy) rules.
 const KNOWN_BUG_PATTERN = /^ItLife[SL]$|^ItWeapon[SL]$|^ItFullRecover$/;
 
-// Build a reverse lookup (string code -> numeric id) once, used to resolve "M"-prefixed
-// codes to their "1"-prefixed sprite-sheet equivalent.
-const CODE_TO_ID = {};
-for (const idStr of Object.keys(ITEM_ID_MAP)) {
-  const id = Number(idStr);
-  CODE_TO_ID[ITEM_ID_MAP[id]] = id;
-}
-
-function computeSpritePosition(id) {
-  const sx = (id % 8) * 16;
-  const sy = Math.floor(id / 256) * 256 + Math.floor((id % 256) / 8) * 16 + 128;
-  return { sx, sy };
-}
-
-// Resolves the numeric id whose sprite-sheet slot should be used for a given ITEM_ID_MAP
-// entry. Returns null if there is no usable slot (M-prefixed code with no 1-equivalent).
-function resolveSpriteId(id, code) {
-  if (!code.startsWith("M")) {
-    return id;
-  }
-  const equivalentCode = "1" + code.slice(1);
-  const equivalentId = CODE_TO_ID[equivalentCode];
-  return equivalentId === undefined ? null : equivalentId;
-}
-
-function spriteBoxStyle(spriteId) {
-  const { sx, sy } = computeSpritePosition(spriteId);
+function spriteBoxStyle({ sx, sy }) {
   const bgWidth = SPRITE_SHEET_NATIVE_W * SCALE;
   const bgHeight = SPRITE_SHEET_NATIVE_H * SCALE;
   const posX = -(sx * SCALE);
@@ -107,8 +82,8 @@ function buildRow(id, code) {
 
   const spriteTd = document.createElement("td");
   spriteTd.className = "icon-cell sprite-cell";
-  const spriteId = resolveSpriteId(id, code);
-  if (spriteId === null) {
+  const spritePos = getSpritePositionForId(id);
+  if (spritePos === null) {
     tr.classList.add("no-mapping");
     const placeholder = document.createElement("div");
     placeholder.className = "no-mapping-placeholder";
@@ -116,7 +91,10 @@ function buildRow(id, code) {
     spriteTd.appendChild(placeholder);
   } else {
     const div = document.createElement("div");
-    div.setAttribute("style", spriteBoxStyle(spriteId));
+    div.setAttribute("style", spriteBoxStyle(spritePos));
+    // CODE_TO_ID is icon_map.js's canonical reverse lookup, used here only to surface
+    // which numeric id's sprite slot was actually used (for the M->1 cross-reference note).
+    const spriteId = code.startsWith("M") ? CODE_TO_ID["1" + code.slice(1)] : id;
     div.title = `sprite id ${spriteId}${spriteId !== id ? ` (via M->1 cross-reference from id ${id})` : ""}`;
     spriteTd.appendChild(div);
   }
@@ -137,7 +115,7 @@ function render() {
 
   let noMappingCount = 0;
   for (const entry of entries) {
-    if (entry.code.startsWith("M") && resolveSpriteId(entry.id, entry.code) === null) {
+    if (entry.code.startsWith("M") && getSpritePositionForId(entry.id) === null) {
       noMappingCount++;
     }
   }
@@ -197,7 +175,9 @@ if (typeof document !== "undefined") {
 }
 
 // Exposed for headless verification (e.g. `node --check` plus manual spot-checks); harmless
-// in the browser since nothing else references a global `module`.
+// in the browser since nothing else references a global `module`. The sprite-slicing logic
+// itself (computeSpritePosition/getSpritePositionForId/CODE_TO_ID) now lives solely in
+// icon_map.js and is covered by tracker/icon_map.test.mjs.
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { computeSpritePosition, resolveSpriteId, CODE_TO_ID, KNOWN_BUG_PATTERN };
+  module.exports = { KNOWN_BUG_PATTERN };
 }

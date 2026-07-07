@@ -1,5 +1,21 @@
 const GENERIC_ICON = "assets/x.png";
 
+// Sprite-sliced icon source (primary icon path — see getSpritePositionForId below).
+// Ported from tracker/icon_audit.js's proven, owner-approved implementation.
+const SPRITE_SHEET_FILE = "assets/item_icon_sheet.png";
+const SPRITE_TILE_PX = 16;
+const SPRITE_SHEET_NATIVE_W = 128;
+const SPRITE_SHEET_NATIVE_H = 896;
+
+// Reverse lookup (string code -> numeric id), used to resolve "M"-prefixed codes
+// (this project's own "shared/either-game" bank, ids ~768-883, which have no slot
+// of their own in the sprite sheet) to their "1"-prefixed sprite-sheet equivalent.
+const CODE_TO_ID = {};
+for (const idStr of Object.keys(ITEM_ID_MAP)) {
+  const id = Number(idStr);
+  CODE_TO_ID[ITEM_ID_MAP[id]] = id;
+}
+
 // Verified against ref/multiworld/lua/itemName.lua's English boss names.
 // The id-map's 2-letter codes come from the Japanese name romanizations,
 // which is why some diverge from the English-name asset filename codes
@@ -93,4 +109,31 @@ function getIconInfoForId(numericId) {
     return { file: GENERIC_ICON, label: String(numericId) };
   }
   return getIconInfo(idString);
+}
+
+function computeSpritePosition(id) {
+  const sx = (id % 8) * 16;
+  const sy = Math.floor(id / 256) * 256 + Math.floor((id % 256) / 8) * 16 + 128;
+  return { sx, sy };
+}
+
+// Returns {sx, sy, label} for the given numeric item id, or null if there is no
+// usable sprite slot (id not in ITEM_ID_MAP at all, or an "M"-prefixed code with
+// no "1"-prefixed equivalent to borrow a sprite position from).
+function getSpritePositionForId(numericId) {
+  const code = ITEM_ID_MAP[numericId];
+  if (!code) {
+    return null;
+  }
+  let spriteId = numericId;
+  if (code.startsWith("M")) {
+    const equivalentCode = "1" + code.slice(1);
+    const equivalentId = CODE_TO_ID[equivalentCode];
+    if (equivalentId === undefined) {
+      return null;
+    }
+    spriteId = equivalentId;
+  }
+  const { sx, sy } = computeSpritePosition(spriteId);
+  return { sx, sy, label: labelFor(code) };
 }

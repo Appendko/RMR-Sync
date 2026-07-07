@@ -18,16 +18,28 @@ function renderEntry(event, showText) {
   entry.appendChild(player);
 
   for (const itemId of event.items) {
-    const info = getIconInfoForId(itemId);
-    const img = document.createElement("img");
-    img.src = info.file;
-    img.alt = info.label;
-    img.title = info.label;
-    entry.appendChild(img);
+    const spritePos = getSpritePositionForId(itemId);
+    const label = getIconInfoForId(itemId).label;
+    if (spritePos) {
+      const icon = document.createElement("div");
+      icon.className = "icon-sprite";
+      icon.style.backgroundPosition = `-${spritePos.sx * 1.5}px -${spritePos.sy * 1.5}px`;
+      icon.title = label;
+      entry.appendChild(icon);
+    } else {
+      // Rare fallback: no sprite slot for this id (see getSpritePositionForId in
+      // icon_map.js). Render the old hand-curated icon so nothing renders blank.
+      const info = getIconInfoForId(itemId);
+      const img = document.createElement("img");
+      img.src = info.file;
+      img.alt = info.label;
+      img.title = info.label;
+      entry.appendChild(img);
+    }
     if (showText) {
       const text = document.createElement("span");
       text.className = "item-label";
-      text.textContent = info.label;
+      text.textContent = label;
       entry.appendChild(text);
     }
   }
