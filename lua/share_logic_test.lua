@@ -29,4 +29,19 @@ assertEqual(ShareLogic.shouldForceOverwrite(2, 1), true, "shouldForceOverwrite a
 assertEqual(ShareLogic.shouldForceOverwrite(1, 1), false, "shouldForceOverwrite equal")
 assertEqual(ShareLogic.shouldForceOverwrite(0, 1), false, "shouldForceOverwrite behind")
 
+-- extractSeedKey: pulls the capital-S Base64 seed segment out of the Option
+-- string, surviving boot.lua's own truncation of the tail since the seed
+-- segment sits early in the string.
+local fullOptionString = "V204#X7#xABA#Sbc8XFnwXt+HHkWR/eJMZRA#sk#W1#T#sKM75#ISB0#ISC#cL25#sK1AP//Y/8#sK2AP//Y2P/#sK3AP//Y/8#PEREREREREQ#MQQAIgEgE#clAA7gARw#roHw"
+assertEqual(ShareLogic.extractSeedKey(fullOptionString), "bc8XFnwXt+HHkWR/eJMZRA", "extractSeedKey full string")
+
+local truncatedOptionString = "V204#X7#xABA#Sbc8XFnwXt+HHkWR/eJMZRA#sk#W1#T#sKM75#ISB0#ISC#cL25#sK1AP//Y/8#sK2AP//Y2P/#sK3AP//Y"
+assertEqual(ShareLogic.extractSeedKey(truncatedOptionString), "bc8XFnwXt+HHkWR/eJMZRA", "extractSeedKey boot.lua-truncated string")
+
+local noSeedSegment = "V204#X7#xABA#sk#W1#T#sKM75#ISB0#ISC"
+assertEqual(ShareLogic.extractSeedKey(noSeedSegment), noSeedSegment, "extractSeedKey no seed segment falls back unchanged")
+
+local shortOptionString = "V204#X7#SV8d5m27k+p99XcvrXsSiYA#sk#W1#T#ISB0#ISC#PEREREREREQ#MQAAIgEgA"
+assertEqual(ShareLogic.extractSeedKey(shortOptionString), "V8d5m27k+p99XcvrXsSiYA", "extractSeedKey short non-truncated string, seed segment in different position")
+
 print("ALL PASS")

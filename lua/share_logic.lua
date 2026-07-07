@@ -36,3 +36,19 @@ end
 function ShareLogic.shouldForceOverwrite(responseEpoch, knownEpoch)
     return responseEpoch > knownEpoch
 end
+
+-- Extracts the randomizer's unique Base64 seed value from a full Option
+-- string, so the room key stays short and stable even when boot.lua's
+-- own 128-byte ROM-read cap truncates sessionSave.param for an unusually
+-- long Option string (many non-default settings). Falls back to the
+-- original string unchanged if the expected "S<base64>" segment isn't
+-- found, so an unexpected format degrades gracefully.
+function ShareLogic.extractSeedKey(optionString)
+    for segment in optionString:gmatch("[^#]+") do
+        local seed = segment:match("^S([%w%+/]+)$")
+        if seed then
+            return seed
+        end
+    end
+    return optionString
+end

@@ -81,7 +81,7 @@ local function urlEncode(str)
     end))
 end
 
-print("RMR Sync: tracker link query suffix: ?room=" .. urlEncode(sessionSave.param))
+print("RMR Sync: tracker link query suffix: ?room=" .. urlEncode(ShareLogic.extractSeedKey(sessionSave.param)))
 
 math.randomseed(os.time())
 local session = string.format("%06x", math.random(0, 0xFFFFFF))
@@ -136,7 +136,7 @@ local function issueRequest()
         session = session,
         seq = seq,
         workerUrl = cfg.worker_url,
-        roomKey = sessionSave.param,
+        roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
         sync = { checksSeen = readChecksSeen(), epoch = knownEpoch },
         events = pendingEvents,

@@ -38,6 +38,7 @@
 
 <div id="status">No status yet.</div>
 
+<script src="room_key.js"></script>
 <script>
 function getBaseUrl() {
   return document.getElementById("workerUrl").value.trim().replace(/\/$/, "");
@@ -45,7 +46,7 @@ function getBaseUrl() {
 
 function getRoomUrl(path) {
   const base = getBaseUrl();
-  const room = encodeURIComponent(document.getElementById("roomKey").value.trim());
+  const room = encodeURIComponent(extractSeedKey(document.getElementById("roomKey").value.trim()));
   return `${base}/room/${room}${path}`;
 }
 
