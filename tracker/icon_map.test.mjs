@@ -67,9 +67,47 @@ test("maps X3 weapon codes to the verified asset codes", () => {
 });
 
 test("falls back to the generic icon for unmapped ids instead of throwing", () => {
-  const result = getIconInfo("1ItStageVariedSC");
+  const result = getIconInfo("ItEmpty");
   assert.equal(result.file, "assets/x.png");
   assert.equal(typeof result.label, "string");
+});
+
+test("maps numbered Sigma stage-keys for every game", () => {
+  assert.equal(getIconInfo("1ItKeyS11").file, "assets/sigma.png");
+  assert.equal(getIconInfo("2ItKeyS11").file, "assets/sigma.png");
+  assert.equal(getIconInfo("3ItKeyS11").file, "assets/sigma.png");
+  assert.equal(getIconInfo("MItKeyS11").file, "assets/sigma.png");
+  // Boundary numbers.
+  assert.equal(getIconInfo("1ItKeyS1").file, "assets/sigma.png");
+  assert.equal(getIconInfo("3ItKeyS14").file, "assets/sigma.png");
+});
+
+test("maps X3 special named keys to the key icon", () => {
+  assert.equal(getIconInfo("3ItKeyVavaStage").file, "assets/key.png");
+  assert.equal(getIconInfo("3ItKeyVajurila").file, "assets/key.png");
+  assert.equal(getIconInfo("3ItKeyMandarela").file, "assets/key.png");
+  assert.equal(getIconInfo("3ItKeyVava").file, "assets/key.png");
+});
+
+test("maps M-prefixed boss/weapon codes via the game-1 fallback", () => {
+  assert.equal(getIconInfo("MItWeaponLO").file, "assets/x1_weapon_lo.png");
+  assert.equal(getIconInfo("MItKeyIP").file, "assets/x1_weapon_cp.png");
+});
+
+test("maps ItStageVaried codes to the matching boss weapon asset", () => {
+  assert.equal(getIconInfo("1ItStageVariedSC").file, "assets/x1_weapon_sc.png");
+  assert.equal(getIconInfo("3ItStageVariedEH").file, "assets/x3_weapon_bh.png");
+  assert.equal(getIconInfo("MItStageVariedBN").file, "assets/x1_weapon_fm.png");
+});
+
+test("maps X2 Zero parts to the X armor-part icons", () => {
+  assert.equal(getIconInfo("2ItZeroFoot").file, "assets/x2_x_foot.png");
+  assert.equal(getIconInfo("2ItZeroFHead").file, "assets/x2_x_head.png");
+  assert.equal(getIconInfo("2ItZeroBody").file, "assets/x2_x_body.png");
+});
+
+test("maps MItHadouken alongside the existing 1ItHadouken rule", () => {
+  assert.equal(getIconInfo("MItHadouken").file, "assets/x1_x_hadouken.png");
 });
 
 test("derives a readable label from the id string", () => {

@@ -23,9 +23,11 @@ const SIMPLE_RULES = [
   { pattern: /^ItLife[SL]$/, file: "assets/heart.png" },
   { pattern: /^ItWeapon[SL]$/, file: "assets/energy.png" },
   { pattern: /^ItFullRecover$/, file: "assets/heart.png" },
-  { pattern: /^1ItHadouken$/, file: "assets/x1_x_hadouken.png" },
+  { pattern: /^[1M]ItHadouken$/, file: "assets/x1_x_hadouken.png" },
   { pattern: /^2ItShoryuken$/, file: "assets/x2_x_shoryuken.png" },
   { pattern: /^3ItSaber$/, file: "assets/x3_x_saber.png" },
+  { pattern: /^[123M]ItKeyS\d+$/, file: "assets/sigma.png" },
+  { pattern: /^3ItKey(?:VavaStage|Vajurila|Mandarela|Vava)$/, file: "assets/key.png" },
 ];
 
 function getIconInfo(idString) {
@@ -50,13 +52,28 @@ function getIconInfo(idString) {
     return { file: `assets/x3_ridearmor_${letter}.png`, label };
   }
 
-  const bossMatch = idString.match(/^([123])It(?:Weapon|Key)([A-Z]{2})$/);
+  const bossMatch = idString.match(/^([123M])It(?:Weapon|Key)([A-Z]{2})$/);
   if (bossMatch) {
-    const game = bossMatch[1];
+    const game = bossMatch[1] === "M" ? "1" : bossMatch[1];
     const assetCode = BOSS_CODE_MAP[game][bossMatch[2]];
     if (assetCode) {
       return { file: `assets/x${game}_weapon_${assetCode}.png`, label };
     }
+  }
+
+  const stageVariedMatch = idString.match(/^([123M])ItStageVaried([A-Z]{2})$/);
+  if (stageVariedMatch) {
+    const game = stageVariedMatch[1] === "M" ? "1" : stageVariedMatch[1];
+    const assetCode = BOSS_CODE_MAP[game][stageVariedMatch[2]];
+    if (assetCode) {
+      return { file: `assets/x${game}_weapon_${assetCode}.png`, label };
+    }
+  }
+
+  const zeroPartMatch = idString.match(/^2ItZero(Head|FHead|Body|Foot)$/);
+  if (zeroPartMatch) {
+    const part = zeroPartMatch[1] === "FHead" ? "head" : PART_ASSET_NAMES[zeroPartMatch[1]] || zeroPartMatch[1].toLowerCase();
+    return { file: `assets/x2_x_${part}.png`, label };
   }
 
   return { file: GENERIC_ICON, label };
