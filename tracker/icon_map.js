@@ -27,7 +27,10 @@ const SIMPLE_RULES = [
   { pattern: /^2ItShoryuken$/, file: "assets/x2_x_shoryuken.png" },
   { pattern: /^3ItSaber$/, file: "assets/x3_x_saber.png" },
   { pattern: /^[123M]ItKeyS\d+$/, file: "assets/sigma.png" },
-  { pattern: /^3ItKey(?:VavaStage|Vajurila|Mandarela|Vava)$/, file: "assets/key.png" },
+  { pattern: /^3ItKeyVavaStage$/, file: "assets/vava.png" },
+  { pattern: /^3ItKeyVajurila$/, file: "assets/bit.png" },
+  { pattern: /^3ItKeyMandarela$/, file: "assets/byte.png" },
+  { pattern: /^3ItKeyVava$/, file: "assets/vava.png" },
 ];
 
 function getIconInfo(idString) {

@@ -82,11 +82,11 @@ test("maps numbered Sigma stage-keys for every game", () => {
   assert.equal(getIconInfo("3ItKeyS14").file, "assets/sigma.png");
 });
 
-test("maps X3 special named keys to the key icon", () => {
-  assert.equal(getIconInfo("3ItKeyVavaStage").file, "assets/key.png");
-  assert.equal(getIconInfo("3ItKeyVajurila").file, "assets/key.png");
-  assert.equal(getIconInfo("3ItKeyMandarela").file, "assets/key.png");
-  assert.equal(getIconInfo("3ItKeyVava").file, "assets/key.png");
+test("maps X3 special named keys to their purpose-built character icons", () => {
+  assert.equal(getIconInfo("3ItKeyVavaStage").file, "assets/vava.png");
+  assert.equal(getIconInfo("3ItKeyVajurila").file, "assets/bit.png");
+  assert.equal(getIconInfo("3ItKeyMandarela").file, "assets/byte.png");
+  assert.equal(getIconInfo("3ItKeyVava").file, "assets/vava.png");
 });
 
 test("maps M-prefixed boss/weapon codes via the game-1 fallback", () => {
