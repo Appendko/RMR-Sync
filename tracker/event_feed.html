@@ -6,7 +6,6 @@
 <title>RMR Sync — Event Feed</title>
 <style>
   body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
-  h1 { font-size: 1.2rem; }
   #controls { margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; }
   #log { display: flex; flex-direction: column; gap: 0.4rem; }
   .entry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; background: #222; padding: 0.4rem 0.6rem; border-radius: 4px; }
@@ -22,14 +21,12 @@
     image-rendering: pixelated;
   }
   .entry .item-label { font-size: 0.85rem; color: #ccc; margin-left: 0.2rem; }
-  #connectionState { font-size: 0.85rem; color: #999; }
+  .entry.status-line { color: #999; font-size: 0.85rem; font-style: italic; }
 </style>
 </head>
 <body>
-<h1>RMR Sync — Event Feed</h1>
 <div id="controls">
   <label><input type="checkbox" id="showText" /> Show item names</label>
-  <span id="connectionState">not connected</span>
 </div>
 <div id="log"></div>
 <script src="item_id_map.js"></script>

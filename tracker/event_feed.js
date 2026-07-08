@@ -61,6 +61,15 @@ function getMaxLines() {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+// Optional ?showText=1 query param to set the "Show item names" checkbox's
+// initial state -- an OBS Browser Source can't click a checkbox, so this
+// lets that default be baked into the configured URL. The checkbox remains
+// clickable afterward for normal browser-tab viewers.
+function getShowTextDefault() {
+  const raw = getQueryParam("showText");
+  return raw === "1" || raw === "true";
+}
+
 function toWebSocketUrl(workerUrl, room) {
   const httpUrl = new URL(`/room/${encodeURIComponent(room)}/ws`, workerUrl);
   httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -119,11 +128,34 @@ function renderEntry(event, showText) {
 
 function main() {
   const room = getRoomFromQuery();
-  const connectionState = document.getElementById("connectionState");
   const log = document.getElementById("log");
   const showTextCheckbox = document.getElementById("showText");
+  showTextCheckbox.checked = getShowTextDefault();
   const maxLines = getMaxLines();
   let allEvents = [];
+
+  // Appends an already-built element to the log, trimming the oldest entry
+  // off the front whenever maxLines is set and exceeded -- used for both
+  // real item entries and status messages, so status lines are just another
+  // entry in the same capped stream and naturally get pushed out by newer
+  // ones (item pickups or later status updates) rather than staying pinned
+  // as a permanent header.
+  function appendToLog(el) {
+    log.appendChild(el);
+    if (maxLines) {
+      while (log.children.length > maxLines) {
+        log.firstElementChild.remove();
+      }
+    }
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function appendStatusLine(text) {
+    const el = document.createElement("div");
+    el.className = "entry status-line";
+    el.textContent = text;
+    appendToLog(el);
+  }
 
   function renderAll() {
     log.innerHTML = "";
@@ -143,13 +175,13 @@ function main() {
   showTextCheckbox.addEventListener("input", renderAll);
 
   if (!room) {
-    connectionState.textContent = "no ?room=<key> in URL";
+    appendStatusLine("no ?room=<key> in URL");
     return;
   }
 
   const workerUrl = resolveWorkerUrl();
   if (!workerUrl) {
-    connectionState.textContent = "no Worker URL provided";
+    appendStatusLine("no Worker URL provided");
     return;
   }
 
@@ -160,13 +192,12 @@ function main() {
     const ws = new WebSocket(toWebSocketUrl(workerUrl, room));
 
     ws.addEventListener("open", () => {
-      connectionState.textContent = `connected to room ${room}`;
       reconnectDelayMs = 1000;
     });
 
     ws.addEventListener("close", () => {
       const retryInSeconds = Math.round(reconnectDelayMs / 1000);
-      connectionState.textContent = `disconnected -- reconnecting in ${retryInSeconds}s...`;
+      appendStatusLine(`disconnected -- reconnecting in ${retryInSeconds}s...`);
       setTimeout(connect, reconnectDelayMs);
       reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
     });
@@ -174,20 +205,14 @@ function main() {
     ws.addEventListener("message", (message) => {
       const data = JSON.parse(message.data);
       if (data.type === "init") {
-        connectionState.textContent = `connected to room ${room} (mode: ${data.mode ?? "not created yet"})`;
         allEvents = data.backlog.slice();
         renderAll();
+        appendStatusLine(`connected to room ${room} (mode: ${data.mode ?? "not created yet"})`);
       } else if (data.type === "event") {
         allEvents.push(data.event);
         const el = renderEntry(data.event, showTextCheckbox.checked);
         if (el) {
-          log.appendChild(el);
-          if (maxLines) {
-            while (log.children.length > maxLines) {
-              log.firstElementChild.remove();
-            }
-          }
-          log.scrollTop = log.scrollHeight;
+          appendToLog(el);
         }
       }
     });
