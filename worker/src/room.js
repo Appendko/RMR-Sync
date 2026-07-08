@@ -54,6 +54,7 @@ export class RoomDO {
   async alarm() {
     await this.state.storage.deleteAll();
     this.sockets.clear();
+    this.recentlyPostedItems.clear();
   }
 
   async handleInit(request) {
@@ -106,6 +107,7 @@ export class RoomDO {
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.scheduleExpiry();
+    this.recentlyPostedItems.clear();
     return jsonResponse({ ok: true, mode: newMode });
   }
 
@@ -122,6 +124,7 @@ export class RoomDO {
     await this.state.storage.deleteAlarm();
     await this.state.storage.deleteAll();
     this.sockets.clear();
+    this.recentlyPostedItems.clear();
     return jsonResponse({ deleted: true });
   }
 
