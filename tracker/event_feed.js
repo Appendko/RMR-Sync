@@ -2,40 +2,54 @@ function getQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
-function getRoomFromQuery() {
-  return getQueryParam("room");
-}
-
+const ROOM_STORAGE_KEY = "rmrSyncRoom";
 const WORKER_URL_STORAGE_KEY = "rmrSyncWorkerUrl";
+const MAX_LINES_STORAGE_KEY = "rmrSyncMaxLines";
+const SHOW_TEXT_STORAGE_KEY = "rmrSyncShowText";
 
-// Resolves the Worker URL without necessarily needing an interactive prompt --
-// important for OBS Browser Source, where a static configured URL is the only
-// practical option (OBS's embedded Chromium does not reliably support
-// window.prompt()) and for normal browser tabs, where re-prompting on every
-// reload (e.g. mid-stream) would be disruptive. Priority: explicit ?workerUrl=
-// query param (best for OBS -- bake it into the one-time Browser Source URL),
-// then a previously-saved value in localStorage, then finally an interactive
-// prompt as a last resort (saving whatever's entered for next time).
-function resolveWorkerUrl() {
-  const fromQuery = getQueryParam("workerUrl");
-  if (fromQuery) {
+// Resolves a setting that can come from either a URL query param or the
+// settings panel (saved to localStorage). localStorage wins whenever it has
+// *any* value (including an explicitly-cleared empty string) -- the query
+// param only seeds localStorage the first time nothing is saved yet. This
+// makes the settings panel actually useful for values baked into an OBS
+// Browser Source's configured URL (like room): once you Apply a change in
+// the panel, it keeps sticking even though OBS keeps reloading that same
+// original URL with its old query params.
+function resolveStoredOrQuery(storageKey, queryName) {
+  let stored = null;
+  try {
+    stored = window.localStorage.getItem(storageKey);
+  } catch {
+    // localStorage may be unavailable (e.g. private browsing) -- fall
+    // through to the query param for this page load.
+  }
+  if (stored !== null) {
+    return stored;
+  }
+  const fromQuery = getQueryParam(queryName);
+  if (fromQuery !== null) {
     try {
-      window.localStorage.setItem(WORKER_URL_STORAGE_KEY, fromQuery);
+      window.localStorage.setItem(storageKey, fromQuery);
     } catch {
-      // localStorage may be unavailable (e.g. private browsing) -- not fatal,
-      // the query param itself is still used for this page load.
+      // not fatal -- the query param itself still applies for this load
     }
     return fromQuery;
   }
+  return null;
+}
 
-  let stored = null;
-  try {
-    stored = window.localStorage.getItem(WORKER_URL_STORAGE_KEY);
-  } catch {
-    // ignore -- fall through to prompting
-  }
-  if (stored) {
-    return stored;
+function resolveRoom() {
+  return resolveStoredOrQuery(ROOM_STORAGE_KEY, "room");
+}
+
+// Resolves the Worker URL without necessarily needing an interactive prompt --
+// important for OBS Browser Source, where window.prompt() doesn't reliably
+// work (use the settings panel instead) and for normal browser tabs, where
+// re-prompting on every reload (e.g. mid-stream) would be disruptive.
+function resolveWorkerUrl() {
+  const resolved = resolveStoredOrQuery(WORKER_URL_STORAGE_KEY, "workerUrl");
+  if (resolved) {
+    return resolved;
   }
 
   // eslint-disable-next-line no-alert
@@ -50,24 +64,57 @@ function resolveWorkerUrl() {
   return prompted;
 }
 
-// Optional ?maxLines=N query param for OBS-style compact display: keep only
-// the most recent N rendered entries on screen (older ones are dropped from
-// the DOM entirely, not scrolled) so the log never grows taller than a fixed
-// number of lines and no scrollbar is ever needed. Unset (the default) keeps
-// today's unlimited behavior unchanged.
+// Optional ?maxLines=N query param (or settings-panel equivalent) for
+// OBS-style compact display: keep only the most recent N rendered entries
+// on screen (older ones are dropped from the DOM entirely, not scrolled) so
+// the log never grows taller than a fixed number of lines and no scrollbar
+// is ever needed. Unset/blank keeps the unlimited default.
 function getMaxLines() {
-  const raw = getQueryParam("maxLines");
+  const raw = resolveStoredOrQuery(MAX_LINES_STORAGE_KEY, "maxLines");
   const parsed = raw ? Number(raw) : NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-// Optional ?showText=1 query param to set the "Show item names" checkbox's
-// initial state -- an OBS Browser Source can't click a checkbox, so this
-// lets that default be baked into the configured URL. The checkbox remains
-// clickable afterward for normal browser-tab viewers.
+// Optional ?showText=1 query param (or settings-panel equivalent) for
+// whether item names render next to their icons.
 function getShowTextDefault() {
-  const raw = getQueryParam("showText");
+  const raw = resolveStoredOrQuery(SHOW_TEXT_STORAGE_KEY, "showText");
   return raw === "1" || raw === "true";
+}
+
+// Hidden top-left settings panel (revealed on hover) so a streamer can
+// change room/workerUrl/maxLines/showText from inside an OBS Browser
+// Source via "Interact" -- without editing the source's configured URL,
+// which is awkward mid-stream and doesn't support window.prompt() anyway.
+// Applying always reloads the page (see resolveStoredOrQuery above for why
+// a saved value keeps sticking across reloads).
+function setupSettingsPanel() {
+  const roomInput = document.getElementById("settingsRoom");
+  const workerUrlInput = document.getElementById("settingsWorkerUrl");
+  const maxLinesInput = document.getElementById("settingsMaxLines");
+  const showTextInput = document.getElementById("settingsShowText");
+  const applyButton = document.getElementById("settingsApply");
+
+  roomInput.value = resolveStoredOrQuery(ROOM_STORAGE_KEY, "room") ?? "";
+  workerUrlInput.value = resolveStoredOrQuery(WORKER_URL_STORAGE_KEY, "workerUrl") ?? "";
+  maxLinesInput.value = resolveStoredOrQuery(MAX_LINES_STORAGE_KEY, "maxLines") ?? "";
+  const storedShowText = resolveStoredOrQuery(SHOW_TEXT_STORAGE_KEY, "showText");
+  showTextInput.checked = storedShowText === "1" || storedShowText === "true";
+
+  applyButton.addEventListener("click", () => {
+    const setStored = (key, value) => {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        // localStorage unavailable -- Apply can't persist anything this session
+      }
+    };
+    setStored(ROOM_STORAGE_KEY, roomInput.value.trim());
+    setStored(WORKER_URL_STORAGE_KEY, workerUrlInput.value.trim());
+    setStored(MAX_LINES_STORAGE_KEY, maxLinesInput.value.trim());
+    setStored(SHOW_TEXT_STORAGE_KEY, showTextInput.checked ? "1" : "0");
+    window.location.reload();
+  });
 }
 
 function toWebSocketUrl(workerUrl, room) {
@@ -127,10 +174,8 @@ function renderEntry(event, showText) {
 }
 
 function main() {
-  const room = getRoomFromQuery();
   const log = document.getElementById("log");
-  const showTextCheckbox = document.getElementById("showText");
-  showTextCheckbox.checked = getShowTextDefault();
+  const showText = getShowTextDefault();
   const maxLines = getMaxLines();
   let allEvents = [];
 
@@ -161,7 +206,7 @@ function main() {
     log.innerHTML = "";
     const rendered = [];
     for (const event of allEvents) {
-      const el = renderEntry(event, showTextCheckbox.checked);
+      const el = renderEntry(event, showText);
       if (el) {
         rendered.push(el);
       }
@@ -172,16 +217,17 @@ function main() {
     }
   }
 
-  showTextCheckbox.addEventListener("input", renderAll);
+  setupSettingsPanel();
 
+  const room = resolveRoom();
   if (!room) {
-    appendStatusLine("no ?room=<key> in URL");
+    appendStatusLine("no room set -- use the settings panel (top-left corner) or add ?room=<key> to the URL");
     return;
   }
 
   const workerUrl = resolveWorkerUrl();
   if (!workerUrl) {
-    appendStatusLine("no Worker URL provided");
+    appendStatusLine("no Worker URL set -- use the settings panel (top-left corner) or add ?workerUrl=<url> to the URL");
     return;
   }
 
@@ -210,7 +256,7 @@ function main() {
         appendStatusLine(`connected to room ${room} (mode: ${data.mode ?? "not created yet"})`);
       } else if (data.type === "event") {
         allEvents.push(data.event);
-        const el = renderEntry(data.event, showTextCheckbox.checked);
+        const el = renderEntry(data.event, showText);
         if (el) {
           appendToLog(el);
         }

@@ -42,21 +42,29 @@ for the full design.
 
 ## Using the event feed as an OBS Browser Source
 
-`tracker/event_feed.html` supports extra query parameters aimed at overlay
-use:
+`tracker/event_feed.html` has a hidden settings panel in the top-left
+corner, revealed on hover — with OBS's "Interact" mode (right-click the
+Browser Source → Interact), you can hover there and fill in the room key,
+Worker URL, max lines, and show-item-names, then click **Apply & reload**.
+This is the easiest way to change rooms between seeds without touching the
+Browser Source's configured URL (which OBS doesn't make convenient to edit
+mid-stream) — settings applied this way are saved in the browser's local
+storage and take priority over anything baked into the URL from then on.
 
-- `?workerUrl=<url>` — skips the interactive Worker URL prompt entirely
-  (OBS's embedded browser doesn't reliably support `window.prompt()`, so
-  this is effectively required for OBS, not just a convenience). Bake it
-  directly into the Browser Source's configured URL alongside `room`, e.g.
+The same settings can also be baked into the Browser Source's configured
+URL as query parameters, which is useful for the very first load (before
+anything's been saved) or for sharing a ready-to-use link:
+
+- `?room=<key>` / `?workerUrl=<url>` — set the room and Worker URL, e.g.
   `event_feed.html?room=<option string>&workerUrl=https://rmr-sync.yourname.workers.dev`.
-  Once provided this way (or entered once via the prompt in a normal
-  browser tab), it's also remembered in that browser's local storage, so
-  reloading later won't re-prompt even without repeating the query param.
+  (`workerUrl` still falls back to an interactive `window.prompt()` if
+  never set any other way, but OBS's embedded browser doesn't reliably
+  support that prompt — use the settings panel instead for OBS.)
 - `?maxLines=N` — caps the feed to the most recent N entries; older ones
   are dropped from the page entirely rather than scrolled, so there's never
-  a scrollbar to deal with in a fixed-size overlay. Omit it to keep the
-  full, unlimited history (today's default behavior).
+  a scrollbar to deal with in a fixed-size overlay. Omit it (or clear it in
+  the settings panel) to keep the full, unlimited history.
+- `?showText=1` — shows item names next to their icons.
 
 ## Quick start (for a group already using a deployed Worker)
 

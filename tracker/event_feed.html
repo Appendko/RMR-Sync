@@ -6,7 +6,6 @@
 <title>RMR Sync — Event Feed</title>
 <style>
   body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
-  #controls { margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; }
   #log { display: flex; flex-direction: column; gap: 0.4rem; }
   .entry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; background: #222; padding: 0.4rem 0.6rem; border-radius: 4px; }
   .entry .player { font-weight: bold; margin-right: 0.4rem; }
@@ -22,11 +21,92 @@
   }
   .entry .item-label { font-size: 0.85rem; color: #ccc; margin-left: 0.2rem; }
   .entry.status-line { color: #999; font-size: 0.85rem; font-style: italic; }
+
+  #settingsHotspot {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+  }
+  #settingsGear {
+    display: block;
+    padding: 6px 10px;
+    font-size: 16px;
+    color: #888;
+    opacity: 0.3;
+    user-select: none;
+  }
+  #settingsHotspot:hover #settingsGear {
+    opacity: 1;
+  }
+  #settingsPanel {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 0 6px 6px 0;
+    padding: 0.75rem;
+    min-width: 260px;
+    font-size: 0.85rem;
+  }
+  #settingsHotspot:hover #settingsPanel {
+    display: flex;
+  }
+  #settingsPanel label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  #settingsPanel label.checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  #settingsPanel input[type="text"],
+  #settingsPanel input[type="number"] {
+    background: #222;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+  }
+  #settingsPanel button {
+    background: #333;
+    border: 1px solid #555;
+    color: #eee;
+    padding: 0.4rem;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #settingsPanel button:hover {
+    background: #444;
+  }
 </style>
 </head>
 <body>
-<div id="controls">
-  <label><input type="checkbox" id="showText" /> Show item names</label>
+<div id="settingsHotspot">
+  <span id="settingsGear">⚙</span>
+  <div id="settingsPanel">
+    <label>Room key
+      <input type="text" id="settingsRoom" autocomplete="off" />
+    </label>
+    <label>Worker URL
+      <input type="text" id="settingsWorkerUrl" autocomplete="off" />
+    </label>
+    <label>Max lines (blank = unlimited)
+      <input type="number" id="settingsMaxLines" min="1" />
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" id="settingsShowText" />
+      Show item names
+    </label>
+    <button id="settingsApply" type="button">Apply &amp; reload</button>
+  </div>
 </div>
 <div id="log"></div>
 <script src="item_id_map.js"></script>
