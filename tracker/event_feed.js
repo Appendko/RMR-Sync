@@ -196,12 +196,19 @@ function renderEntry(event, showText, lang, shareFlags) {
   for (const itemId of realItems) {
     const spritePos = getSpritePositionForId(itemId);
     const name = getItemNameForId(itemId, lang, shareFlags);
+    // Wrap each item's icon + label together as one flex item, so a wrapped
+    // row (many items on a long event, or a narrow/zoomed-in window) only ever
+    // breaks *between* items -- never between an icon and its own label,
+    // which used to leave the label flush against the container's left edge
+    // on its own line, looking disconnected from its icon.
+    const item = document.createElement("span");
+    item.className = "item";
     if (spritePos) {
       const icon = document.createElement("div");
       icon.className = "icon-sprite";
       icon.style.backgroundPosition = `-${spritePos.sx * 1.5}px -${spritePos.sy * 1.5}px`;
       icon.title = name;
-      entry.appendChild(icon);
+      item.appendChild(icon);
     } else {
       // Rare fallback: no sprite slot for this id (see getSpritePositionForId in
       // icon_map.js). Render the old hand-curated icon so nothing renders blank.
@@ -210,14 +217,15 @@ function renderEntry(event, showText, lang, shareFlags) {
       img.src = info.file;
       img.alt = name;
       img.title = name;
-      entry.appendChild(img);
+      item.appendChild(img);
     }
     if (showText) {
       const text = document.createElement("span");
       text.className = "item-label";
       text.textContent = name;
-      entry.appendChild(text);
+      item.appendChild(text);
     }
+    entry.appendChild(item);
   }
 
   return entry;
