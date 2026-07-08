@@ -176,22 +176,25 @@ test("getSpritePositionForId gives ItWeaponS/ItWeaponL their own distinct sprite
   assert.notDeepEqual({ sx: weaponL.sx, sy: weaponL.sy }, { sx: energyUp.sx, sy: energyUp.sy });
 });
 
-test("getItemNameForId returns the localized name for a regular id in every supported language", () => {
+test("getItemNameForId returns the localized name, tagged with its game number, in every supported language", () => {
   // id 46 = "1ItWeaponBK" (Boomer Kuwanger).
-  assert.equal(getItemNameForId(46, "en"), "Weapon : Boomer Kuwanger");
-  assert.equal(getItemNameForId(46, "ja"), "武器 : ブーメル・クワンガー");
-  assert.equal(getItemNameForId(46, "zh-TW"), "武器: 回力鏢鍬型蟲");
+  assert.equal(getItemNameForId(46, "en"), "[1] Weapon : Boomer Kuwanger");
+  assert.equal(getItemNameForId(46, "ja"), "[1] 武器 : ブーメル・クワンガー");
+  assert.equal(getItemNameForId(46, "zh-TW"), "[1] 武器: 回力鏢鍬型蟲");
 });
 
-test("getItemNameForId resolves an M-prefixed id to its 1-prefixed name equivalent", () => {
+test("getItemNameForId resolves an M-prefixed id to its 1-prefixed name equivalent, but tags it [M] not [1]", () => {
   // id 814 = "MItWeaponBK"; its "1"-prefixed equivalent is id 46 = "1ItWeaponBK".
+  // The underlying name is borrowed from game 1, but the tag reflects the id's own
+  // code (M = RMR's shared/either-game bank), not the game it borrowed data from.
   for (const lang of TEST_LANGS) {
-    assert.equal(getItemNameForId(814, lang), getItemNameForId(46, lang));
+    assert.equal(getItemNameForId(814, lang), getItemNameForId(46, lang).replace(/^\[1\] /, "[M] "));
   }
 });
 
 test("getItemNameForId has hand-translated entries for ids missing from the source data", () => {
   // 120 = "ItLifeS" (an enemy-drop item AutoTracker/itemName.lua never tracked).
+  // No leading digit in its code, so no game tag -- these apply the same in every game.
   assert.equal(getItemNameForId(120, "en"), "Small Health Energy");
   assert.equal(getItemNameForId(120, "ja"), "小回復（体力）");
   assert.equal(getItemNameForId(120, "zh-TW"), "小型體力恢復");

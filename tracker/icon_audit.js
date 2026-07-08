@@ -32,10 +32,12 @@ const KNOWN_BUG_PATTERN = /^ItLife[SL]$|^ItWeapon[SL]$|^ItFullRecover$/;
 // Languages shown as extra name columns, keyed by ITEM_NAME_TABLES' own keys (icon_map.js).
 const AUDIT_LANGS = SUPPORTED_LANGS;
 
-// Same lookup order as getItemNameForId (icon_map.js), but also reports whether the
-// result came from a real per-language translation or fell back to English / the
-// mechanical code-derived label -- used here to flag translation gaps that
-// getItemNameForId itself intentionally papers over for player-facing display.
+// Same lookup order as getItemNameForId (icon_map.js), including its "[1]"/"[M]"
+// game tag prefix (so this audit shows exactly what players will see), but also
+// reports whether the result came from a real per-language translation or fell back
+// to English / the mechanical code-derived label -- used here to flag translation
+// gaps that getItemNameForId itself intentionally papers over for player-facing
+// display.
 function nameInfo(id, lang) {
   const code = ITEM_ID_MAP[id];
   let lookupId = id;
@@ -45,15 +47,16 @@ function nameInfo(id, lang) {
       lookupId = equivalentId;
     }
   }
+  const tag = gameTagFor(code);
   const table = ITEM_NAME_TABLES[lang];
   if (table && table[lookupId] !== undefined) {
-    return { name: table[lookupId], fallback: null };
+    return { name: tag + table[lookupId], fallback: null };
   }
   const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
   if (lang !== DEFAULT_LANG && englishTable && englishTable[lookupId] !== undefined) {
-    return { name: englishTable[lookupId], fallback: "english" };
+    return { name: tag + englishTable[lookupId], fallback: "english" };
   }
-  return { name: getIconInfoForId(id).label, fallback: "mechanical" };
+  return { name: tag + getIconInfoForId(id).label, fallback: "mechanical" };
 }
 
 function spriteBoxStyle({ sx, sy }) {

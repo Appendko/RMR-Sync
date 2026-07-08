@@ -146,13 +146,27 @@ const ITEM_NAME_TABLES = { en: ITEM_NAMES_EN, ja: ITEM_NAMES_JA, "zh-TW": ITEM_N
 const SUPPORTED_LANGS = ["en", "ja", "zh-TW"];
 const DEFAULT_LANG = "en";
 
-// Returns the localized display name for a numeric item id. "M"-prefixed codes
-// (this project's own "shared/either-game" bank) have no entry of their own in any
-// name table -- same as the sprite sheet, they're resolved by cross-referencing to
-// their "1"-prefixed equivalent id instead (see getSpritePositionForId above).
-// Falls back to English if the requested language has no entry for this id (covers
-// the ids intentionally left blank in one language's data), and finally to the
-// mechanical code-derived label if no real translation exists anywhere.
+// Prefixes a name with its game tag, e.g. "[1] " for a "1ItXxx" code, matching the
+// "[1]Weapon : ..." style ref/multiworld/lua/itemName.lua itself uses. "M"-prefixed
+// codes (this project's own "shared/either-game" bank) get "[M]" rather than being
+// relabeled as game 1 -- they borrow game 1's name/icon data, but aren't actually
+// game-1-specific, so tagging them as game 1 would misattribute them. Codes with no
+// leading game digit at all (ItLifeS, ItWeaponS, ItFullRecover, ItEmpty -- enemy
+// drops and the empty sentinel, which apply the same way regardless of game) get no
+// tag.
+function gameTagFor(code) {
+  const match = code && code.match(/^([123M])/);
+  return match ? `[${match[1]}] ` : "";
+}
+
+// Returns the localized display name for a numeric item id, prefixed with its game
+// tag (see gameTagFor). "M"-prefixed codes (this project's own "shared/either-game"
+// bank) have no entry of their own in any name table -- same as the sprite sheet,
+// they're resolved by cross-referencing to their "1"-prefixed equivalent id instead
+// (see getSpritePositionForId above). Falls back to English if the requested
+// language has no entry for this id (covers the ids intentionally left blank in one
+// language's data), and finally to the mechanical code-derived label if no real
+// translation exists anywhere.
 function getItemNameForId(numericId, lang) {
   const code = ITEM_ID_MAP[numericId];
   let lookupId = numericId;
@@ -164,12 +178,12 @@ function getItemNameForId(numericId, lang) {
   }
 
   const table = ITEM_NAME_TABLES[lang];
+  let name;
   if (table && table[lookupId] !== undefined) {
-    return table[lookupId];
+    name = table[lookupId];
+  } else {
+    const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
+    name = englishTable && englishTable[lookupId] !== undefined ? englishTable[lookupId] : getIconInfoForId(numericId).label;
   }
-  const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
-  if (englishTable && englishTable[lookupId] !== undefined) {
-    return englishTable[lookupId];
-  }
-  return getIconInfoForId(numericId).label;
+  return gameTagFor(code) + name;
 }
