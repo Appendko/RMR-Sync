@@ -7,6 +7,7 @@ const WORKER_URL_STORAGE_KEY = "rmrSyncWorkerUrl";
 const MAX_LINES_STORAGE_KEY = "rmrSyncMaxLines";
 const SHOW_TEXT_STORAGE_KEY = "rmrSyncShowText";
 const LANG_STORAGE_KEY = "rmrSyncLang";
+const SCALE_STORAGE_KEY = "rmrSyncScale";
 
 // Resolves a setting that can come from either a URL query param or the
 // settings panel (saved to localStorage). localStorage wins whenever it has
@@ -110,6 +111,16 @@ function resolveLanguage() {
   return detectBrowserLang() || DEFAULT_LANG;
 }
 
+// Optional ?scale=N query param (or settings-panel equivalent), as a percentage
+// (100 = normal size). Applied as CSS zoom on the whole #log container so text,
+// icons, and spacing all scale together instead of just the font growing while
+// icons stay a fixed 24px.
+function getScalePercent() {
+  const raw = resolveStoredOrQuery(SCALE_STORAGE_KEY, "scale");
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 50 && parsed <= 300 ? parsed : 100;
+}
+
 // Hidden top-left settings panel (revealed on hover) so a streamer can
 // change room/workerUrl/maxLines/showText from inside an OBS Browser
 // Source via "Interact" -- without editing the source's configured URL,
@@ -122,6 +133,7 @@ function setupSettingsPanel() {
   const maxLinesInput = document.getElementById("settingsMaxLines");
   const showTextInput = document.getElementById("settingsShowText");
   const langInput = document.getElementById("settingsLang");
+  const scaleInput = document.getElementById("settingsScale");
   const applyButton = document.getElementById("settingsApply");
 
   roomInput.value = resolveStoredOrQuery(ROOM_STORAGE_KEY, "room") ?? "";
@@ -133,6 +145,9 @@ function setupSettingsPanel() {
   // rather than only the raw stored/query value, so the dropdown always shows
   // what's actually in effect right now, not blank when nothing's been chosen yet.
   langInput.value = resolveLanguage();
+  // Same reasoning as language: show the fully-resolved (defaulted) scale, not
+  // a blank field, so the panel always reflects what's currently on screen.
+  scaleInput.value = getScalePercent();
 
   applyButton.addEventListener("click", () => {
     const setStored = (key, value) => {
@@ -147,6 +162,7 @@ function setupSettingsPanel() {
     setStored(MAX_LINES_STORAGE_KEY, maxLinesInput.value.trim());
     setStored(SHOW_TEXT_STORAGE_KEY, showTextInput.checked ? "1" : "0");
     setStored(LANG_STORAGE_KEY, langInput.value);
+    setStored(SCALE_STORAGE_KEY, scaleInput.value.trim());
     window.location.reload();
   });
 }
@@ -209,6 +225,11 @@ function renderEntry(event, showText, lang, shareFlags) {
 
 function main() {
   const log = document.getElementById("log");
+  // CSS zoom (not just font-size) so icons and spacing scale right along with
+  // the text -- otherwise a bigger font would look mismatched next to
+  // still-24px icons. Chromium-only, but this whole tracker already assumes a
+  // Chromium browser (File System Access API, WebRTC keep-alive, etc.).
+  log.style.zoom = getScalePercent() / 100;
   const showText = getShowTextDefault();
   const lang = resolveLanguage();
   const maxLines = getMaxLines();

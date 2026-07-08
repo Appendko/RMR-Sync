@@ -8,7 +8,7 @@
   body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
   #log { display: flex; flex-direction: column; gap: 0.4rem; }
   .entry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; background: #222; padding: 0.4rem 0.6rem; border-radius: 4px; }
-  .entry .player { font-weight: bold; margin-right: 0.4rem; }
+  .entry .player { font-size: 1rem; font-weight: bold; margin-right: 0.4rem; }
   .entry img { width: 24px; height: 24px; flex-shrink: 0; image-rendering: pixelated; }
   .entry .icon-sprite {
     width: 24px;
@@ -19,7 +19,7 @@
     background-size: 192px 1344px;
     image-rendering: pixelated;
   }
-  .entry .item-label { font-size: 0.85rem; color: #ccc; margin-left: 0.2rem; }
+  .entry .item-label { font-size: 1rem; color: #ccc; margin-left: 0.2rem; }
   .entry.status-line { color: #999; font-size: 0.85rem; font-style: italic; }
 
   #settingsHotspot {
@@ -112,6 +112,9 @@
         <option value="ja">日本語</option>
         <option value="zh-TW">繁體中文</option>
       </select>
+    </label>
+    <label>Overlay scale (%)
+      <input type="number" id="settingsScale" min="50" max="300" step="10" />
     </label>
     <button id="settingsApply" type="button">Apply &amp; reload</button>
   </div>

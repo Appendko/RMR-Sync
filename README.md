@@ -73,6 +73,8 @@ anything's been saved) or for sharing a ready-to-use link:
   Traditional Chinese). Without this or a saved settings-panel choice, the
   feed auto-detects from the browser's own language setting, falling back
   to English if that doesn't match a supported language.
+- `?scale=N` — overlay size as a percentage (e.g. `150` for 150%); text,
+  icons, and spacing all scale together. Defaults to 100.
 
 ## Quick start (for a group already using a deployed Worker)
 
