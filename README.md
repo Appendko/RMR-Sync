@@ -28,10 +28,35 @@ for the full design.
   or another Chromium browser) and picks the folder containing `boot.lua`.
   It relays those local files to the Worker in the background; keep the tab
   open while playing. This is what actually talks to the network on behalf
-  of `share_info.lua`.
+  of `share_info.lua`. **Keep this window at least partially visible on
+  screen** (not minimized, and not fully covered by another maximized
+  window like BizHawk) — Chrome throttles timers in fully hidden/occluded
+  windows down to as little as once per minute, which can make syncing
+  appear stuck or cause duplicate-looking item reports. A small window
+  positioned somewhere BizHawk isn't drawing over it is enough; it doesn't
+  need focus, just visibility.
 - `tracker/event_feed.html` — open with `?room=<the seed's Option string>`
   to watch the live event feed. Read-only, works in any browser — no folder
-  access needed, unlike `sync_relay.html`.
+  access needed, unlike `sync_relay.html`. See "OBS Browser Source" below
+  for streaming-specific options.
+
+## Using the event feed as an OBS Browser Source
+
+`tracker/event_feed.html` supports extra query parameters aimed at overlay
+use:
+
+- `?workerUrl=<url>` — skips the interactive Worker URL prompt entirely
+  (OBS's embedded browser doesn't reliably support `window.prompt()`, so
+  this is effectively required for OBS, not just a convenience). Bake it
+  directly into the Browser Source's configured URL alongside `room`, e.g.
+  `event_feed.html?room=<option string>&workerUrl=https://rmr-sync.yourname.workers.dev`.
+  Once provided this way (or entered once via the prompt in a normal
+  browser tab), it's also remembered in that browser's local storage, so
+  reloading later won't re-prompt even without repeating the query param.
+- `?maxLines=N` — caps the feed to the most recent N entries; older ones
+  are dropped from the page entirely rather than scrolled, so there's never
+  a scrollbar to deal with in a fixed-size overlay. Omit it to keep the
+  full, unlimited history (today's default behavior).
 
 ## Quick start (for a group already using a deployed Worker)
 

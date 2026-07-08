@@ -1,5 +1,64 @@
+function getQueryParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
 function getRoomFromQuery() {
-  return new URLSearchParams(window.location.search).get("room");
+  return getQueryParam("room");
+}
+
+const WORKER_URL_STORAGE_KEY = "rmrSyncWorkerUrl";
+
+// Resolves the Worker URL without necessarily needing an interactive prompt --
+// important for OBS Browser Source, where a static configured URL is the only
+// practical option (OBS's embedded Chromium does not reliably support
+// window.prompt()) and for normal browser tabs, where re-prompting on every
+// reload (e.g. mid-stream) would be disruptive. Priority: explicit ?workerUrl=
+// query param (best for OBS -- bake it into the one-time Browser Source URL),
+// then a previously-saved value in localStorage, then finally an interactive
+// prompt as a last resort (saving whatever's entered for next time).
+function resolveWorkerUrl() {
+  const fromQuery = getQueryParam("workerUrl");
+  if (fromQuery) {
+    try {
+      window.localStorage.setItem(WORKER_URL_STORAGE_KEY, fromQuery);
+    } catch {
+      // localStorage may be unavailable (e.g. private browsing) -- not fatal,
+      // the query param itself is still used for this page load.
+    }
+    return fromQuery;
+  }
+
+  let stored = null;
+  try {
+    stored = window.localStorage.getItem(WORKER_URL_STORAGE_KEY);
+  } catch {
+    // ignore -- fall through to prompting
+  }
+  if (stored) {
+    return stored;
+  }
+
+  // eslint-disable-next-line no-alert
+  const prompted = window.prompt("Worker URL (e.g. https://rmr-sync.yourname.workers.dev)");
+  if (prompted) {
+    try {
+      window.localStorage.setItem(WORKER_URL_STORAGE_KEY, prompted);
+    } catch {
+      // ignore
+    }
+  }
+  return prompted;
+}
+
+// Optional ?maxLines=N query param for OBS-style compact display: keep only
+// the most recent N rendered entries on screen (older ones are dropped from
+// the DOM entirely, not scrolled) so the log never grows taller than a fixed
+// number of lines and no scrollbar is ever needed. Unset (the default) keeps
+// today's unlimited behavior unchanged.
+function getMaxLines() {
+  const raw = getQueryParam("maxLines");
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function toWebSocketUrl(workerUrl, room) {
@@ -63,15 +122,21 @@ function main() {
   const connectionState = document.getElementById("connectionState");
   const log = document.getElementById("log");
   const showTextCheckbox = document.getElementById("showText");
+  const maxLines = getMaxLines();
   let allEvents = [];
 
   function renderAll() {
     log.innerHTML = "";
+    const rendered = [];
     for (const event of allEvents) {
       const el = renderEntry(event, showTextCheckbox.checked);
       if (el) {
-        log.appendChild(el);
+        rendered.push(el);
       }
+    }
+    const toShow = maxLines ? rendered.slice(-maxLines) : rendered;
+    for (const el of toShow) {
+      log.appendChild(el);
     }
   }
 
@@ -82,8 +147,7 @@ function main() {
     return;
   }
 
-  // eslint-disable-next-line no-alert
-  const workerUrl = window.prompt("Worker URL (e.g. https://rmr-sync.yourname.workers.dev)");
+  const workerUrl = resolveWorkerUrl();
   if (!workerUrl) {
     connectionState.textContent = "no Worker URL provided";
     return;
@@ -118,6 +182,11 @@ function main() {
         const el = renderEntry(data.event, showTextCheckbox.checked);
         if (el) {
           log.appendChild(el);
+          if (maxLines) {
+            while (log.children.length > maxLines) {
+              log.firstElementChild.remove();
+            }
+          }
           log.scrollTop = log.scrollHeight;
         }
       }
