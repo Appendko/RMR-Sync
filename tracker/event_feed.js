@@ -63,7 +63,7 @@ function main() {
   const connectionState = document.getElementById("connectionState");
   const log = document.getElementById("log");
   const showTextCheckbox = document.getElementById("showText");
-  const allEvents = [];
+  let allEvents = [];
 
   function renderAll() {
     log.innerHTML = "";
@@ -89,31 +89,42 @@ function main() {
     return;
   }
 
-  const ws = new WebSocket(toWebSocketUrl(workerUrl, room));
+  let reconnectDelayMs = 1000;
+  const MAX_RECONNECT_DELAY_MS = 15000;
 
-  ws.addEventListener("open", () => {
-    connectionState.textContent = `connected to room ${room}`;
-  });
+  function connect() {
+    const ws = new WebSocket(toWebSocketUrl(workerUrl, room));
 
-  ws.addEventListener("close", () => {
-    connectionState.textContent = "disconnected";
-  });
+    ws.addEventListener("open", () => {
+      connectionState.textContent = `connected to room ${room}`;
+      reconnectDelayMs = 1000;
+    });
 
-  ws.addEventListener("message", (message) => {
-    const data = JSON.parse(message.data);
-    if (data.type === "init") {
-      connectionState.textContent = `connected to room ${room} (mode: ${data.mode ?? "not created yet"})`;
-      allEvents.push(...data.backlog);
-      renderAll();
-    } else if (data.type === "event") {
-      allEvents.push(data.event);
-      const el = renderEntry(data.event, showTextCheckbox.checked);
-      if (el) {
-        log.appendChild(el);
-        log.scrollTop = log.scrollHeight;
+    ws.addEventListener("close", () => {
+      const retryInSeconds = Math.round(reconnectDelayMs / 1000);
+      connectionState.textContent = `disconnected -- reconnecting in ${retryInSeconds}s...`;
+      setTimeout(connect, reconnectDelayMs);
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+    });
+
+    ws.addEventListener("message", (message) => {
+      const data = JSON.parse(message.data);
+      if (data.type === "init") {
+        connectionState.textContent = `connected to room ${room} (mode: ${data.mode ?? "not created yet"})`;
+        allEvents = data.backlog.slice();
+        renderAll();
+      } else if (data.type === "event") {
+        allEvents.push(data.event);
+        const el = renderEntry(data.event, showTextCheckbox.checked);
+        if (el) {
+          log.appendChild(el);
+          log.scrollTop = log.scrollHeight;
+        }
       }
-    }
-  });
+    });
+  }
+
+  connect();
 }
 
 main();
