@@ -28,13 +28,12 @@ for the full design.
   or another Chromium browser) and picks the folder containing `boot.lua`.
   It relays those local files to the Worker in the background; keep the tab
   open while playing. This is what actually talks to the network on behalf
-  of `share_info.lua`. **Keep this window at least partially visible on
-  screen** (not minimized, and not fully covered by another maximized
-  window like BizHawk) — Chrome throttles timers in fully hidden/occluded
-  windows down to as little as once per minute, which can make syncing
-  appear stuck or cause duplicate-looking item reports. A small window
-  positioned somewhere BizHawk isn't drawing over it is enough; it doesn't
-  need focus, just visibility.
+  of `share_info.lua`. It sets up a silent, local-only WebRTC keep-alive
+  connection so it keeps syncing promptly even if the window is minimized or
+  fully covered by another maximized window like BizHawk — no need to keep
+  it visible on screen. If syncing ever does appear stuck (e.g. the
+  keep-alive failed to set up in your browser), bringing the window back on
+  screen will force it to catch up.
 - `tracker/event_feed.html` — open with `?room=<the seed's Option string>`
   to watch the live event feed. Read-only, works in any browser — no folder
   access needed, unlike `sync_relay.html`. See "OBS Browser Source" below

@@ -6,6 +6,7 @@ let dirHandle = null;
 let lastSession = null;
 let lastSeq = -1;
 let pollHandle = null;
+let keepAlivePcs = null; // holds the two RTCPeerConnections so they aren't GC'd
 
 function log(text) {
   statusEl.textContent = text;
@@ -112,9 +113,40 @@ async function tick() {
   log(`Connected. Last handled request: seq ${req.seq}${resp.error ? " (error: " + resp.error + ")" : ""}`);
 }
 
+// Keep this tab exempt from Chrome's *intensive* background-tab timer
+// throttling (which otherwise drops our poll from 400ms to once-per-minute
+// when the window is hidden or fully covered by BizHawk). A tab holding a
+// live WebRTC connection is exempt from that tier; the once-per-second base
+// clamp still applies, which is fine for a file relay. This is a purely
+// local loopback -- two peer connections in this same page wired to each
+// other -- so there's no server, no STUN/TURN, and no network traffic.
+async function startKeepAlive() {
+  if (keepAlivePcs || typeof RTCPeerConnection === "undefined") return;
+  try {
+    const pc1 = new RTCPeerConnection();
+    const pc2 = new RTCPeerConnection();
+    keepAlivePcs = [pc1, pc2];
+    pc1.onicecandidate = (e) => { if (e.candidate) pc2.addIceCandidate(e.candidate); };
+    pc2.onicecandidate = (e) => { if (e.candidate) pc1.addIceCandidate(e.candidate); };
+    pc1.createDataChannel("keepalive");
+    const offer = await pc1.createOffer();
+    await pc1.setLocalDescription(offer);
+    await pc2.setRemoteDescription(offer);
+    const answer = await pc2.createAnswer();
+    await pc2.setLocalDescription(answer);
+    await pc1.setRemoteDescription(answer);
+  } catch (e) {
+    // Non-fatal: relay still works, just subject to throttling as before.
+    // (Keeping the window visible remains the fallback -- see README.)
+    keepAlivePcs = null;
+    console.warn("keep-alive setup failed; relay may throttle when hidden:", e);
+  }
+}
+
 function startPolling() {
   if (pollHandle) clearInterval(pollHandle);
   pollHandle = setInterval(() => { tick().catch((e) => log("Relay error: " + e)); }, 400);
+  startKeepAlive();
   log("Connected. Watching for sync requests...");
 }
 
