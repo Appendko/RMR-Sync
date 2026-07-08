@@ -146,28 +146,60 @@ const ITEM_NAME_TABLES = { en: ITEM_NAMES_EN, ja: ITEM_NAMES_JA, "zh-TW": ITEM_N
 const SUPPORTED_LANGS = ["en", "ja", "zh-TW"];
 const DEFAULT_LANG = "en";
 
+// Classifies a code into one of the item categories ref/aaa/boot.lua's own
+// mergeItems logic can share across all 3 games for a seed (see the shareXxx
+// bitfield it decodes from ROM), based on the same offset ranges boot.lua uses.
+// Boss weapons/keys and stage-varied codes are intentionally excluded: boot.lua
+// defines bits for those (shareSpecialWeapon/shareStageKey) but leaves them
+// commented out/unused, so they're never actually shared in this ROM regardless
+// of seed settings. RideArmor/ZeroParts/Vava-family and the numbered Sigma-key
+// suffix on top of a plain digit prefix are also excluded for the same reason
+// (boot.lua's ranges treat them as title-specific, not shareable). Returns null
+// for anything not in a shareable category.
+function shareCategoryFor(code) {
+  if (!code) return null;
+  const suffix = code.replace(/^[123M]/, "");
+  if (/^ItLifeUp/.test(suffix)) return "lifeUp";
+  if (/^ItEnergyUp/.test(suffix)) return "energyUp";
+  if (/^ItSubtank/.test(suffix)) return "subTank";
+  if (/^ItKeyS\d+$/.test(suffix)) return "sigmaKey";
+  if (/^It(Hadouken|Shoryuken|Saber)$/.test(suffix)) return "finalWeapon";
+  if (/^It(Head|Arm|Body|Foot)(Part|Chip)$/.test(suffix)) return "armor";
+  if (/^It(Buster|Charge)/.test(suffix)) return "upgradeItem";
+  return null;
+}
+
 // Prefixes a name with its game tag, e.g. "[1] " for a "1ItXxx" code, matching the
-// "[1]Weapon : ..." style ref/multiworld/lua/itemName.lua itself uses. "M"-prefixed
-// codes (this project's own "shared/either-game" bank) get "[M]" rather than being
-// relabeled as game 1 -- they borrow game 1's name/icon data, but aren't actually
-// game-1-specific, so tagging them as game 1 would misattribute them. Codes with no
-// leading game digit at all (ItLifeS, ItWeaponS, ItFullRecover, ItEmpty -- enemy
-// drops and the empty sentinel, which apply the same way regardless of game) get no
-// tag.
-function gameTagFor(code) {
-  const match = code && code.match(/^([123M])/);
+// "[1]Weapon : ..." style ref/multiworld/lua/itemName.lua itself uses. If this
+// item's category is configured as shared across all 3 games for this seed
+// (shareFlags, read from ROM by lua/share_info.lua and broadcast per room -- see
+// shareCategoryFor above), the tag is "[*] " instead, regardless of which game it
+// was actually picked up in. "M"-prefixed codes (this project's own
+// "shared/either-game" bank) get "[M]" rather than being relabeled as game 1 --
+// they borrow game 1's name/icon data, but aren't actually game-1-specific, so
+// tagging them as game 1 would misattribute them. Codes with no leading game
+// digit at all (ItLifeS, ItWeaponS, ItFullRecover, ItEmpty -- enemy drops and the
+// empty sentinel, which apply the same way regardless of game) get no tag.
+function gameTagFor(code, shareFlags) {
+  if (!code) return "";
+  const category = shareCategoryFor(code);
+  if (category && shareFlags && shareFlags[category]) {
+    return "[*] ";
+  }
+  const match = code.match(/^([123M])/);
   return match ? `[${match[1]}] ` : "";
 }
 
 // Returns the localized display name for a numeric item id, prefixed with its game
-// tag (see gameTagFor). "M"-prefixed codes (this project's own "shared/either-game"
-// bank) have no entry of their own in any name table -- same as the sprite sheet,
-// they're resolved by cross-referencing to their "1"-prefixed equivalent id instead
-// (see getSpritePositionForId above). Falls back to English if the requested
-// language has no entry for this id (covers the ids intentionally left blank in one
+// tag (see gameTagFor; shareFlags is optional and only affects that tag). "M"-
+// prefixed codes (this project's own "shared/either-game" bank) have no entry of
+// their own in any name table -- same as the sprite sheet, they're resolved by
+// cross-referencing to their "1"-prefixed equivalent id instead (see
+// getSpritePositionForId above). Falls back to English if the requested language
+// has no entry for this id (covers the ids intentionally left blank in one
 // language's data), and finally to the mechanical code-derived label if no real
 // translation exists anywhere.
-function getItemNameForId(numericId, lang) {
+function getItemNameForId(numericId, lang, shareFlags) {
   const code = ITEM_ID_MAP[numericId];
   let lookupId = numericId;
   if (code && code.startsWith("M")) {
@@ -185,5 +217,5 @@ function getItemNameForId(numericId, lang) {
     const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
     name = englishTable && englishTable[lookupId] !== undefined ? englishTable[lookupId] : getIconInfoForId(numericId).label;
   }
-  return gameTagFor(code) + name;
+  return gameTagFor(code, shareFlags) + name;
 }

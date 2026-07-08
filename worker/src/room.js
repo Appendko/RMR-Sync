@@ -1,5 +1,5 @@
 import { orMergeBytes, countSetBits } from "./bits.js";
-import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, validateEventBody } from "./validation.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
 
 const CHECKS_SEEN_LENGTH = 96;
 const MAX_EVENTS = 200;
@@ -71,6 +71,7 @@ export class RoomDO {
     await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
+    await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
     return jsonResponse({ mode: body.mode, created: true });
   }
@@ -106,6 +107,7 @@ export class RoomDO {
     await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("events", []);
+    await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
     this.recentlyPostedItems.clear();
     return jsonResponse({ ok: true, mode: newMode });
@@ -134,8 +136,8 @@ export class RoomDO {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
     const body = await request.json().catch(() => null);
-    if (!body || !isValidChecksSeenArray(body.checksSeen) || !isValidEpoch(body.epoch)) {
-      return jsonResponse({ error: "invalid checksSeen or epoch" }, 400);
+    if (!body || !isValidChecksSeenArray(body.checksSeen) || !isValidEpoch(body.epoch) || !isValidShareFlags(body.shareFlags)) {
+      return jsonResponse({ error: "invalid checksSeen, epoch, or shareFlags" }, 400);
     }
     const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
     const stored = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
@@ -145,8 +147,14 @@ export class RoomDO {
       merged = orMergeBytes(stored, body.checksSeen);
       await this.state.storage.put("checksSeen", merged);
     }
+    // Static per-seed data (read once from ROM by lua/share_info.lua, not derived
+    // from player progress) -- just store whatever's sent, no merge logic needed.
+    if (body.shareFlags !== undefined) {
+      await this.state.storage.put("shareFlags", body.shareFlags);
+    }
+    const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
     await this.scheduleExpiry();
-    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch });
+    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch, shareFlags });
   }
 
   async handleEvent(request) {
@@ -206,7 +214,8 @@ export class RoomDO {
 
     const mode = (await this.state.storage.get("mode")) ?? null;
     const backlog = (await this.state.storage.get("events")) ?? [];
-    server.send(JSON.stringify({ type: "init", mode, backlog }));
+    const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
+    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags }));
 
     server.addEventListener("close", () => this.sockets.delete(server));
     server.addEventListener("error", () => this.sockets.delete(server));

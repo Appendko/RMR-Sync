@@ -14,11 +14,11 @@ async function initRoom(stub, mode) {
   });
 }
 
-function sync(stub, checksSeen, epoch) {
+function sync(stub, checksSeen, epoch, shareFlags) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen, epoch }),
+    body: JSON.stringify({ checksSeen, epoch, shareFlags }),
   });
 }
 
@@ -96,6 +96,35 @@ describe("RoomDO /sync", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ checksSeen: new Array(96).fill(0) }),
     });
+    expect(res.status).toBe(400);
+  });
+
+  it("defaults to an empty shareFlags object when no client has ever sent one", async () => {
+    const stub = getStub("test-room-sync-7");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0);
+    expect((await res.json()).shareFlags).toEqual({});
+  });
+
+  it("stores and echoes back a client-provided shareFlags object", async () => {
+    const stub = getStub("test-room-sync-8");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0, { sigmaKey: true, lifeUp: false });
+    expect((await res.json()).shareFlags).toEqual({ sigmaKey: true, lifeUp: false });
+  });
+
+  it("keeps the last-known shareFlags for a client that omits it", async () => {
+    const stub = getStub("test-room-sync-9");
+    await initRoom(stub, "checksSeen");
+    await sync(stub, new Array(96).fill(0), 0, { sigmaKey: true });
+    const res = await sync(stub, new Array(96).fill(0), 0); // no shareFlags this time
+    expect((await res.json()).shareFlags).toEqual({ sigmaKey: true });
+  });
+
+  it("rejects an invalid shareFlags object", async () => {
+    const stub = getStub("test-room-sync-10");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0, { notARealFlag: true });
     expect(res.status).toBe(400);
   });
 });

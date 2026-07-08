@@ -45,6 +45,24 @@ describe("RoomDO /ws", () => {
     expect(initMsg.mode).toBe("checksSeen+items");
     expect(initMsg.backlog).toHaveLength(1);
     expect(initMsg.backlog[0].items).toEqual([0]);
+    expect(initMsg.shareFlags).toEqual({});
+    ws.close();
+  });
+
+  it("includes shareFlags reported by an earlier /sync call in the init message", async () => {
+    const stub = getStub("test-room-ws-4");
+    await initRoom(stub, "checksSeen+items");
+    await stub.fetch("https://do/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), epoch: 0, shareFlags: { sigmaKey: true } }),
+    });
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await nextMessage(ws);
+    expect(initMsg.shareFlags).toEqual({ sigmaKey: true });
     ws.close();
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret, isValidEpoch } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the two known modes", () => {
@@ -104,5 +104,30 @@ describe("isValidEpoch", () => {
     expect(isValidEpoch(1.5)).toBe(false);
     expect(isValidEpoch("0")).toBe(false);
     expect(isValidEpoch(undefined)).toBe(false);
+  });
+});
+
+describe("isValidShareFlags", () => {
+  it("accepts undefined (older Lua clients that predate this field)", () => {
+    expect(isValidShareFlags(undefined)).toBe(true);
+  });
+
+  it("accepts an empty object and an object with any subset of the known boolean flags", () => {
+    expect(isValidShareFlags({})).toBe(true);
+    expect(isValidShareFlags({ sigmaKey: true, lifeUp: false })).toBe(true);
+  });
+
+  it("rejects an unknown key", () => {
+    expect(isValidShareFlags({ sigmaKey: true, notARealFlag: true })).toBe(false);
+  });
+
+  it("rejects a non-boolean value for a known key", () => {
+    expect(isValidShareFlags({ sigmaKey: "yes" })).toBe(false);
+  });
+
+  it("rejects null, arrays, and non-objects", () => {
+    expect(isValidShareFlags(null)).toBe(false);
+    expect(isValidShareFlags([])).toBe(false);
+    expect(isValidShareFlags("nope")).toBe(false);
   });
 });

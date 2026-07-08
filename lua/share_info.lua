@@ -14,6 +14,12 @@ local addrChecksSeen = 0x7FFF80
 local addrItems = 0x7FFF00
 local addrLastProgressFrame = 0x7E0244
 local cItems = 0x60
+-- Matches ref/aaa/boot.lua's own addrMultiworldInfo table exactly: a per-game,
+-- ROM-resident (not RAM/progress-dependent) address whose +1/+2/+3 bytes encode
+-- this seed's own settings for which item categories are configured as shared
+-- across all 3 games (see readShareFlags below). Static for the whole session,
+-- so it's safe to read once.
+local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
 local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-acquired items; can trigger an early outbox write ahead of the heartbeat
 local cWaitFrames = 600 -- ~10s at 60fps: idle-only heartbeat (pulls others' checksSeen updates when nothing local has triggered a request) -- deliberately slow to reduce Worker/Durable-Object request volume for a real multi-player session; checksSeen sync has no real latency requirement
 local cStaleThreshold = 20 -- ~20 fast-cycles * ~0.2s = ~4s of genuine unresponsiveness before warning, matching the original user-facing timing despite ack-checking now running on the fast timer instead of the (now much slower) idle heartbeat
@@ -22,6 +28,27 @@ local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
     if tmp < 0 then tmp = 1 end
     return tmp
+end
+
+-- Reads this seed's own "shared across all 3 games" settings for the item
+-- categories that ref/aaa/boot.lua actually acts on (its shareSpecialWeapon and
+-- shareStageKey bits exist in the byte layout but are commented out/unused in
+-- boot.lua itself, so boss weapons/keys are never really shared -- omitted here
+-- to match actual game behavior). Bit layout confirmed against boot.lua's own
+-- decoding of the same two bytes.
+local function readShareFlags()
+    local base = addrMultiworldInfo[currentTitle()]
+    local shareInfo1 = cpu[base + 1]
+    local shareInfo2 = cpu[base + 2]
+    return {
+        lifeUp = (shareInfo1 & 0x80) ~= 0,
+        energyUp = (shareInfo1 & 0x40) ~= 0,
+        armor = (shareInfo1 & 0x20) ~= 0,
+        subTank = (shareInfo1 & 0x10) ~= 0,
+        finalWeapon = (shareInfo1 & 0x02) ~= 0,
+        sigmaKey = (shareInfo1 & 0x01) ~= 0,
+        upgradeItem = (shareInfo2 & 0x80) ~= 0,
+    }
 end
 
 local function readChecksSeen()
@@ -85,6 +112,9 @@ print("RMR Sync: tracker link query suffix: ?room=" .. urlEncode(ShareLogic.extr
 
 math.randomseed(os.time())
 local session = string.format("%06x", math.random(0, 0xFFFFFF))
+-- Read once: this seed's own sharing settings are static ROM data for the
+-- whole session, not something that changes as the player progresses.
+local shareFlags = readShareFlags()
 local seq = 0
 local outstandingSeq = nil
 local pendingEvents = {}
@@ -138,7 +168,7 @@ local function issueRequest()
         workerUrl = cfg.worker_url,
         roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
-        sync = { checksSeen = readChecksSeen(), epoch = knownEpoch },
+        sync = { checksSeen = readChecksSeen(), epoch = knownEpoch, shareFlags = shareFlags },
         events = pendingEvents,
     })
 end

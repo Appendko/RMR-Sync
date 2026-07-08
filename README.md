@@ -37,7 +37,11 @@ for the full design.
 - `tracker/event_feed.html` — open with `?room=<the seed's Option string>`
   to watch the live event feed. Read-only, works in any browser — no folder
   access needed, unlike `sync_relay.html`. See "OBS Browser Source" below
-  for streaming-specific options.
+  for streaming-specific options. Each item name is prefixed with `[1]`,
+  `[2]`, or `[3]` to show which game it came from — except for a category
+  this seed's own settings configured as shared across all 3 games (e.g.
+  Sigma Keys), which shows `[*]` instead, since picking it up in any one
+  game counts for all of them.
 
 ## Using the event feed as an OBS Browser Source
 

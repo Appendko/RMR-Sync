@@ -157,7 +157,7 @@ function toWebSocketUrl(workerUrl, room) {
   return httpUrl.toString();
 }
 
-function renderEntry(event, showText, lang) {
+function renderEntry(event, showText, lang, shareFlags) {
   // Some newly-set bits in the game's item-memory region don't correspond to a
   // real, named item (e.g. check/progress-tracking bits that happen to live in
   // the same memory range) -- ITEM_ID_MAP has no entry for those ids. Treat
@@ -179,7 +179,7 @@ function renderEntry(event, showText, lang) {
 
   for (const itemId of realItems) {
     const spritePos = getSpritePositionForId(itemId);
-    const name = getItemNameForId(itemId, lang);
+    const name = getItemNameForId(itemId, lang, shareFlags);
     if (spritePos) {
       const icon = document.createElement("div");
       icon.className = "icon-sprite";
@@ -213,6 +213,12 @@ function main() {
   const lang = resolveLanguage();
   const maxLines = getMaxLines();
   let allEvents = [];
+  // Which item categories this seed's own settings configured as shared across
+  // all 3 games (see gameTagFor in icon_map.js) -- learned from the room's "init"
+  // WS message (see lua/share_info.lua's readShareFlags / worker/src/room.js).
+  // Empty until that first message arrives, meaning every item just shows its
+  // own game's tag until then.
+  let shareFlags = {};
 
   // Appends an already-built element to the log, trimming the oldest entry
   // off the front whenever maxLines is set and exceeded -- used for both
@@ -241,7 +247,7 @@ function main() {
     log.innerHTML = "";
     const rendered = [];
     for (const event of allEvents) {
-      const el = renderEntry(event, showText, lang);
+      const el = renderEntry(event, showText, lang, shareFlags);
       if (el) {
         rendered.push(el);
       }
@@ -287,11 +293,12 @@ function main() {
       const data = JSON.parse(message.data);
       if (data.type === "init") {
         allEvents = data.backlog.slice();
+        shareFlags = data.shareFlags || {};
         renderAll();
         appendStatusLine(`connected to room ${room} (mode: ${data.mode ?? "not created yet"})`);
       } else if (data.type === "event") {
         allEvents.push(data.event);
-        const el = renderEntry(data.event, showText, lang);
+        const el = renderEntry(data.event, showText, lang, shareFlags);
         if (el) {
           appendToLog(el);
         }

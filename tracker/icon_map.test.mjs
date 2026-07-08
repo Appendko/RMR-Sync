@@ -203,3 +203,22 @@ test("getItemNameForId has hand-translated entries for ids missing from the sour
 test("getItemNameForId falls back to the mechanical code-derived label for an id outside the map", () => {
   assert.equal(getItemNameForId(999999, "en"), "999999");
 });
+
+test("getItemNameForId shows [*] instead of the game number when the item's category is shared for this seed", () => {
+  // id 74 = "1ItKeyS11" (a Sigma key -- the "sigmaKey" category).
+  assert.equal(getItemNameForId(74, "en", { sigmaKey: true }), "[*] Key : Sigma");
+  // Without the flag (or with it false), the normal per-game tag still applies.
+  assert.equal(getItemNameForId(74, "en", { sigmaKey: false }), "[1] Key : Sigma");
+  assert.equal(getItemNameForId(74, "en"), "[1] Key : Sigma");
+});
+
+test("getItemNameForId's [*] tagging only applies to the flagged category, not other items", () => {
+  // id 0 = "1ItLifeUp1" (the "lifeUp" category, not "sigmaKey").
+  assert.equal(getItemNameForId(0, "en", { sigmaKey: true }), "[1] Life Up");
+});
+
+test("getItemNameForId never shows [*] for categories boot.lua never actually shares (boss weapons/keys)", () => {
+  // id 46 = "1ItWeaponBK" -- has no shareCategoryFor category at all, so an
+  // (unrealistic) shareFlags object can't accidentally tag it as shared.
+  assert.equal(getItemNameForId(46, "en", { lifeUp: true, energyUp: true, armor: true, subTank: true, finalWeapon: true, sigmaKey: true, upgradeItem: true }), "[1] Weapon : Boomer Kuwanger");
+});
