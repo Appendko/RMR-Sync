@@ -22,6 +22,21 @@ function postEvent(stub, body) {
   });
 }
 
+function nextMessage(ws) {
+  return new Promise((resolve) => {
+    ws.addEventListener("message", (event) => resolve(JSON.parse(event.data)), { once: true });
+  });
+}
+
+async function getBacklog(stub) {
+  const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+  const ws = res.webSocket;
+  ws.accept();
+  const initMsg = await nextMessage(ws);
+  ws.close();
+  return initMsg.backlog;
+}
+
 describe("RoomDO /event", () => {
   it("rejects events before the room is initialized", async () => {
     const stub = getStub("test-room-event-1");
@@ -62,5 +77,64 @@ describe("RoomDO /event", () => {
     }
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status.eventCount).toBe(200);
+  });
+
+  it("silently filters an immediate exact duplicate event", async () => {
+    const stub = getStub("test-room-event-6");
+    await initRoom(stub, "checksSeen+items");
+    const first = await postEvent(stub, { player: "a", game: 1, items: [5] });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ ok: true });
+
+    const second = await postEvent(stub, { player: "a", game: 1, items: [5] });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ ok: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(1);
+  });
+
+  it("filters only the duplicate items from a mixed request, keeping the new ones", async () => {
+    const stub = getStub("test-room-event-7");
+    await initRoom(stub, "checksSeen+items");
+    await postEvent(stub, { player: "a", game: 1, items: [10] });
+    const res = await postEvent(stub, { player: "a", game: 1, items: [10, 11] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(2);
+
+    const backlog = await getBacklog(stub);
+    expect(backlog).toHaveLength(2);
+    expect(backlog[0].items).toEqual([10]);
+    expect(backlog[1].items).toEqual([11]);
+  });
+
+  it("does not dedupe the same item id across different players", async () => {
+    const stub = getStub("test-room-event-8");
+    await initRoom(stub, "checksSeen+items");
+    await postEvent(stub, { player: "a", game: 1, items: [7] });
+    const res = await postEvent(stub, { player: "b", game: 1, items: [7] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(2);
+  });
+
+  it("accepts (200, ok:true) but does not log a fully-duplicate request", async () => {
+    const stub = getStub("test-room-event-9");
+    await initRoom(stub, "checksSeen+items");
+    await postEvent(stub, { player: "a", game: 1, items: [20] });
+    const statusAfterFirst = await (await stub.fetch("https://do/admin/status")).json();
+    expect(statusAfterFirst.eventCount).toBe(1);
+
+    const res = await postEvent(stub, { player: "a", game: 1, items: [20] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const statusAfterSecond = await (await stub.fetch("https://do/admin/status")).json();
+    expect(statusAfterSecond.eventCount).toBe(1);
   });
 });

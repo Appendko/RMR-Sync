@@ -4,6 +4,7 @@ import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, 
 const CHECKS_SEEN_LENGTH = 96;
 const MAX_EVENTS = 200;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
+const DUPLICATE_EVENT_WINDOW_MS = 15000;
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -16,6 +17,7 @@ export class RoomDO {
   constructor(state) {
     this.state = state;
     this.sockets = new Set();
+    this.recentlyPostedItems = new Map(); // "player::itemId" -> last-posted timestamp (ms)
   }
 
   async fetch(request) {
@@ -157,8 +159,31 @@ export class RoomDO {
     if (validationError) {
       return jsonResponse({ error: validationError }, 400);
     }
+    const now = Date.now();
+    // Prune stale entries so this map doesn't grow unbounded over a long session.
+    for (const [key, postedAt] of this.recentlyPostedItems) {
+      if (now - postedAt > DUPLICATE_EVENT_WINDOW_MS) {
+        this.recentlyPostedItems.delete(key);
+      }
+    }
+
+    const newItems = body.items.filter((itemId) => {
+      const key = `${body.player}::${itemId}`;
+      const lastPosted = this.recentlyPostedItems.get(key);
+      if (lastPosted !== undefined && now - lastPosted <= DUPLICATE_EVENT_WINDOW_MS) {
+        return false; // recent duplicate, skip it
+      }
+      this.recentlyPostedItems.set(key, now);
+      return true;
+    });
+
+    if (newItems.length === 0) {
+      // Every item in this request was a recent duplicate -- nothing new to log.
+      return jsonResponse({ ok: true });
+    }
+
     const events = (await this.state.storage.get("events")) ?? [];
-    const event = { player: body.player, game: body.game, items: body.items, ts: Date.now() };
+    const event = { player: body.player, game: body.game, items: newItems, ts: now };
     events.push(event);
     const trimmed = events.slice(-MAX_EVENTS);
     await this.state.storage.put("events", trimmed);
