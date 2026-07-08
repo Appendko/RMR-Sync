@@ -44,11 +44,12 @@ for the full design.
 `tracker/event_feed.html` has a hidden settings panel in the top-left
 corner, revealed on hover — with OBS's "Interact" mode (right-click the
 Browser Source → Interact), you can hover there and fill in the room key,
-Worker URL, max lines, and show-item-names, then click **Apply & reload**.
-This is the easiest way to change rooms between seeds without touching the
-Browser Source's configured URL (which OBS doesn't make convenient to edit
-mid-stream) — settings applied this way are saved in the browser's local
-storage and take priority over anything baked into the URL from then on.
+Worker URL, max lines, show-item-names, and item name language, then click
+**Apply & reload**. This is the easiest way to change rooms between seeds
+without touching the Browser Source's configured URL (which OBS doesn't
+make convenient to edit mid-stream) — settings applied this way are saved
+in the browser's local storage and take priority over anything baked into
+the URL from then on.
 
 The same settings can also be baked into the Browser Source's configured
 URL as query parameters, which is useful for the very first load (before
@@ -64,6 +65,10 @@ anything's been saved) or for sharing a ready-to-use link:
   a scrollbar to deal with in a fixed-size overlay. Omit it (or clear it in
   the settings panel) to keep the full, unlimited history.
 - `?showText=1` — shows item names next to their icons.
+- `?lang=en` / `ja` / `zh-TW` — item name language (English, Japanese, or
+  Traditional Chinese). Without this or a saved settings-panel choice, the
+  feed auto-detects from the browser's own language setting, falling back
+  to English if that doesn't match a supported language.
 
 ## Quick start (for a group already using a deployed Worker)
 

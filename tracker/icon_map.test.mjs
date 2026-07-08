@@ -5,16 +5,21 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-// icon_map.js and item_id_map.js are classic (non-module) browser scripts
-// loaded via two <script> tags sharing one global scope (see event_feed.html).
-// We faithfully mirror that loading mechanism here using vm, rather than
-// importing them as ES modules.
+// icon_map.js and its data dependencies are classic (non-module) browser scripts
+// loaded via a sequence of <script> tags sharing one global scope (see
+// event_feed.html). We faithfully mirror that loading mechanism here using vm,
+// rather than importing them as ES modules.
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const context = {};
 vm.createContext(context);
-vm.runInContext(readFileSync(path.join(dir, "item_id_map.js"), "utf8"), context);
-vm.runInContext(readFileSync(path.join(dir, "icon_map.js"), "utf8"), context);
-const { getIconInfo, getIconInfoForId, getSpritePositionForId } = context;
+for (const file of ["item_id_map.js", "item_names_en.js", "item_names_ja.js", "item_names_zhtw.js", "icon_map.js"]) {
+  vm.runInContext(readFileSync(path.join(dir, file), "utf8"), context);
+}
+const { getIconInfo, getIconInfoForId, getSpritePositionForId, getItemNameForId } = context;
+// icon_map.js declares SUPPORTED_LANGS via `const`, which (unlike `function`/`var`
+// declarations) vm does not expose as a property on the context object -- so this
+// list is duplicated here rather than destructured from context.
+const TEST_LANGS = ["en", "ja", "zh-TW"];
 
 test("maps generic categories regardless of game", () => {
   assert.equal(getIconInfo("1ItLifeUp1").file, "assets/heart.png");
@@ -169,4 +174,29 @@ test("getSpritePositionForId gives ItWeaponS/ItWeaponL their own distinct sprite
 
   assert.notDeepEqual({ sx: weaponS.sx, sy: weaponS.sy }, { sx: energyUp.sx, sy: energyUp.sy });
   assert.notDeepEqual({ sx: weaponL.sx, sy: weaponL.sy }, { sx: energyUp.sx, sy: energyUp.sy });
+});
+
+test("getItemNameForId returns the localized name for a regular id in every supported language", () => {
+  // id 46 = "1ItWeaponBK" (Boomer Kuwanger).
+  assert.equal(getItemNameForId(46, "en"), "Weapon : Boomer Kuwanger");
+  assert.equal(getItemNameForId(46, "ja"), "武器 : ブーメル・クワンガー");
+  assert.equal(getItemNameForId(46, "zh-TW"), "武器: 回力鏢鍬型蟲");
+});
+
+test("getItemNameForId resolves an M-prefixed id to its 1-prefixed name equivalent", () => {
+  // id 814 = "MItWeaponBK"; its "1"-prefixed equivalent is id 46 = "1ItWeaponBK".
+  for (const lang of TEST_LANGS) {
+    assert.equal(getItemNameForId(814, lang), getItemNameForId(46, lang));
+  }
+});
+
+test("getItemNameForId has hand-translated entries for ids missing from the source data", () => {
+  // 120 = "ItLifeS" (an enemy-drop item AutoTracker/itemName.lua never tracked).
+  assert.equal(getItemNameForId(120, "en"), "Small Health Energy");
+  assert.equal(getItemNameForId(120, "ja"), "小回復（体力）");
+  assert.equal(getItemNameForId(120, "zh-TW"), "小型體力恢復");
+});
+
+test("getItemNameForId falls back to the mechanical code-derived label for an id outside the map", () => {
+  assert.equal(getItemNameForId(999999, "en"), "999999");
 });

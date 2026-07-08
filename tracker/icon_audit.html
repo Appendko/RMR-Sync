@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>RMR Sync — Icon Audit (diagnostic, not player-facing)</title>
+<title>RMR Sync — Icon &amp; Name Audit (diagnostic, not player-facing)</title>
 <style>
   body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
   h1 { font-size: 1.2rem; }
@@ -21,6 +21,8 @@
   td.id-cell { width: 3.5rem; color: #999; }
   td.code-cell { font-family: monospace; }
   td.icon-cell { width: 60px; }
+  td.name-cell { max-width: 220px; }
+  td.name-cell.name-fallback { color: #f88; font-style: italic; }
   .icon-box { width: 48px; height: 48px; image-rendering: pixelated; display: block; }
   .no-mapping-placeholder {
     width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
@@ -30,13 +32,16 @@
 </style>
 </head>
 <body>
-<h1>RMR Sync — Icon Audit</h1>
+<h1>RMR Sync — Icon &amp; Name Audit</h1>
 <p class="note">
   Standalone diagnostic page. Not linked from the player-facing UI. Compares each item's
   CURRENTLY-shipped icon (left) against the candidate icon sliced directly out of
   <code>ref/AutoTracker/ItemIcon.png</code> (copied here as <code>assets/item_icon_sheet.png</code>) at that
-  item's own numeric ID (right). Rows highlighted amber are already-known reused-icon bugs
-  (ItLifeS/L, ItWeaponS/L, ItFullRecover reusing the LifeUp/EnergyUp permanent-upgrade icons).
+  item's own numeric ID (right), plus its localized name in each supported language. Rows
+  highlighted amber are already-known reused-icon bugs (ItLifeS/L, ItWeaponS/L, ItFullRecover
+  reusing the LifeUp/EnergyUp permanent-upgrade icons). Name cells in red italics have no real
+  translation for that language (see cell tooltip for whether it fell back to English or to a
+  mechanical code-derived label).
 </p>
 <div id="controls">
   <input type="text" id="filterInput" placeholder="Filter by string code substring…" autocomplete="off" />
@@ -51,11 +56,17 @@
       <th>String code</th>
       <th>Current icon (shipped)</th>
       <th>Sprite-sliced candidate</th>
+      <th>EN name</th>
+      <th>JA name</th>
+      <th>zh-TW name</th>
     </tr>
   </thead>
   <tbody id="rows"></tbody>
 </table>
 <script src="item_id_map.js"></script>
+<script src="item_names_en.js"></script>
+<script src="item_names_ja.js"></script>
+<script src="item_names_zhtw.js"></script>
 <script src="icon_map.js"></script>
 <script src="icon_audit.js"></script>
 </body>

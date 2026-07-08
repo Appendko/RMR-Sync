@@ -6,6 +6,7 @@ const ROOM_STORAGE_KEY = "rmrSyncRoom";
 const WORKER_URL_STORAGE_KEY = "rmrSyncWorkerUrl";
 const MAX_LINES_STORAGE_KEY = "rmrSyncMaxLines";
 const SHOW_TEXT_STORAGE_KEY = "rmrSyncShowText";
+const LANG_STORAGE_KEY = "rmrSyncLang";
 
 // Resolves a setting that can come from either a URL query param or the
 // settings panel (saved to localStorage). localStorage wins whenever it has
@@ -82,6 +83,33 @@ function getShowTextDefault() {
   return raw === "1" || raw === "true";
 }
 
+// Best-effort mapping from the browser's language preference to one of our
+// supported item-name languages. Only maps to zh-TW for Traditional-Chinese-
+// flavored tags (zh-TW/zh-Hant/zh-HK/zh-MO) -- plain "zh" or "zh-CN" is
+// ambiguous/likely Simplified, which we have no data for, so it falls through
+// instead of guessing wrong.
+function detectBrowserLang() {
+  const candidates = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language]) || [];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const lower = raw.toLowerCase();
+    if (lower.startsWith("ja")) return "ja";
+    if (lower.startsWith("zh-tw") || lower.startsWith("zh-hant") || lower.startsWith("zh-hk") || lower.startsWith("zh-mo")) return "zh-TW";
+    if (lower.startsWith("en")) return "en";
+  }
+  return null;
+}
+
+// Resolves the item-name language: explicit ?lang= / settings-panel choice first
+// (see resolveStoredOrQuery), then auto-detected from the browser, then English.
+function resolveLanguage() {
+  const stored = resolveStoredOrQuery(LANG_STORAGE_KEY, "lang");
+  if (stored && SUPPORTED_LANGS.includes(stored)) {
+    return stored;
+  }
+  return detectBrowserLang() || DEFAULT_LANG;
+}
+
 // Hidden top-left settings panel (revealed on hover) so a streamer can
 // change room/workerUrl/maxLines/showText from inside an OBS Browser
 // Source via "Interact" -- without editing the source's configured URL,
@@ -93,6 +121,7 @@ function setupSettingsPanel() {
   const workerUrlInput = document.getElementById("settingsWorkerUrl");
   const maxLinesInput = document.getElementById("settingsMaxLines");
   const showTextInput = document.getElementById("settingsShowText");
+  const langInput = document.getElementById("settingsLang");
   const applyButton = document.getElementById("settingsApply");
 
   roomInput.value = resolveStoredOrQuery(ROOM_STORAGE_KEY, "room") ?? "";
@@ -100,6 +129,10 @@ function setupSettingsPanel() {
   maxLinesInput.value = resolveStoredOrQuery(MAX_LINES_STORAGE_KEY, "maxLines") ?? "";
   const storedShowText = resolveStoredOrQuery(SHOW_TEXT_STORAGE_KEY, "showText");
   showTextInput.checked = storedShowText === "1" || storedShowText === "true";
+  // Prefill with the fully-resolved language (falling through to auto-detect)
+  // rather than only the raw stored/query value, so the dropdown always shows
+  // what's actually in effect right now, not blank when nothing's been chosen yet.
+  langInput.value = resolveLanguage();
 
   applyButton.addEventListener("click", () => {
     const setStored = (key, value) => {
@@ -113,6 +146,7 @@ function setupSettingsPanel() {
     setStored(WORKER_URL_STORAGE_KEY, workerUrlInput.value.trim());
     setStored(MAX_LINES_STORAGE_KEY, maxLinesInput.value.trim());
     setStored(SHOW_TEXT_STORAGE_KEY, showTextInput.checked ? "1" : "0");
+    setStored(LANG_STORAGE_KEY, langInput.value);
     window.location.reload();
   });
 }
@@ -123,7 +157,7 @@ function toWebSocketUrl(workerUrl, room) {
   return httpUrl.toString();
 }
 
-function renderEntry(event, showText) {
+function renderEntry(event, showText, lang) {
   // Some newly-set bits in the game's item-memory region don't correspond to a
   // real, named item (e.g. check/progress-tracking bits that happen to live in
   // the same memory range) -- ITEM_ID_MAP has no entry for those ids. Treat
@@ -145,12 +179,12 @@ function renderEntry(event, showText) {
 
   for (const itemId of realItems) {
     const spritePos = getSpritePositionForId(itemId);
-    const label = getIconInfoForId(itemId).label;
+    const name = getItemNameForId(itemId, lang);
     if (spritePos) {
       const icon = document.createElement("div");
       icon.className = "icon-sprite";
       icon.style.backgroundPosition = `-${spritePos.sx * 1.5}px -${spritePos.sy * 1.5}px`;
-      icon.title = label;
+      icon.title = name;
       entry.appendChild(icon);
     } else {
       // Rare fallback: no sprite slot for this id (see getSpritePositionForId in
@@ -158,14 +192,14 @@ function renderEntry(event, showText) {
       const info = getIconInfoForId(itemId);
       const img = document.createElement("img");
       img.src = info.file;
-      img.alt = info.label;
-      img.title = info.label;
+      img.alt = name;
+      img.title = name;
       entry.appendChild(img);
     }
     if (showText) {
       const text = document.createElement("span");
       text.className = "item-label";
-      text.textContent = label;
+      text.textContent = name;
       entry.appendChild(text);
     }
   }
@@ -176,6 +210,7 @@ function renderEntry(event, showText) {
 function main() {
   const log = document.getElementById("log");
   const showText = getShowTextDefault();
+  const lang = resolveLanguage();
   const maxLines = getMaxLines();
   let allEvents = [];
 
@@ -206,7 +241,7 @@ function main() {
     log.innerHTML = "";
     const rendered = [];
     for (const event of allEvents) {
-      const el = renderEntry(event, showText);
+      const el = renderEntry(event, showText, lang);
       if (el) {
         rendered.push(el);
       }
@@ -256,7 +291,7 @@ function main() {
         appendStatusLine(`connected to room ${room} (mode: ${data.mode ?? "not created yet"})`);
       } else if (data.type === "event") {
         allEvents.push(data.event);
-        const el = renderEntry(data.event, showText);
+        const el = renderEntry(data.event, showText, lang);
         if (el) {
           appendToLog(el);
         }

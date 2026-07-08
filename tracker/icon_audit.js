@@ -29,6 +29,33 @@ const SCALE = DISPLAY_PX / SPRITE_TILE_PX; // uniform upscale factor, kept propo
 // SIMPLE_RULES for the current (buggy) rules.
 const KNOWN_BUG_PATTERN = /^ItLife[SL]$|^ItWeapon[SL]$|^ItFullRecover$/;
 
+// Languages shown as extra name columns, keyed by ITEM_NAME_TABLES' own keys (icon_map.js).
+const AUDIT_LANGS = SUPPORTED_LANGS;
+
+// Same lookup order as getItemNameForId (icon_map.js), but also reports whether the
+// result came from a real per-language translation or fell back to English / the
+// mechanical code-derived label -- used here to flag translation gaps that
+// getItemNameForId itself intentionally papers over for player-facing display.
+function nameInfo(id, lang) {
+  const code = ITEM_ID_MAP[id];
+  let lookupId = id;
+  if (code && code.startsWith("M")) {
+    const equivalentId = CODE_TO_ID["1" + code.slice(1)];
+    if (equivalentId !== undefined) {
+      lookupId = equivalentId;
+    }
+  }
+  const table = ITEM_NAME_TABLES[lang];
+  if (table && table[lookupId] !== undefined) {
+    return { name: table[lookupId], fallback: null };
+  }
+  const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
+  if (lang !== DEFAULT_LANG && englishTable && englishTable[lookupId] !== undefined) {
+    return { name: englishTable[lookupId], fallback: "english" };
+  }
+  return { name: getIconInfoForId(id).label, fallback: "mechanical" };
+}
+
 function spriteBoxStyle({ sx, sy }) {
   const bgWidth = SPRITE_SHEET_NATIVE_W * SCALE;
   const bgHeight = SPRITE_SHEET_NATIVE_H * SCALE;
@@ -100,6 +127,23 @@ function buildRow(id, code) {
   }
   tr.appendChild(spriteTd);
 
+  let hasNameFallback = false;
+  for (const lang of AUDIT_LANGS) {
+    const nameTd = document.createElement("td");
+    nameTd.className = "name-cell";
+    const info = nameInfo(id, lang);
+    nameTd.textContent = info.name;
+    if (info.fallback) {
+      hasNameFallback = true;
+      nameTd.classList.add("name-fallback");
+      nameTd.title = info.fallback === "english" ? "no entry for this language -- showing English" : "no translation anywhere -- showing mechanical code-derived label";
+    }
+    tr.appendChild(nameTd);
+  }
+  if (hasNameFallback) {
+    tr.classList.add("has-name-fallback");
+  }
+
   return tr;
 }
 
@@ -114,15 +158,23 @@ function render() {
     .map((id) => ({ id, code: ITEM_ID_MAP[id] }));
 
   let noMappingCount = 0;
+  const nameFallbackCounts = Object.fromEntries(AUDIT_LANGS.map((lang) => [lang, 0]));
   for (const entry of entries) {
     if (entry.code.startsWith("M") && getSpritePositionForId(entry.id) === null) {
       noMappingCount++;
     }
+    for (const lang of AUDIT_LANGS) {
+      if (nameInfo(entry.id, lang).fallback) {
+        nameFallbackCounts[lang]++;
+      }
+    }
   }
 
+  const fallbackSummary = AUDIT_LANGS.map((lang) => `${lang}: ${nameFallbackCounts[lang]}`).join(", ");
   statsEl.textContent =
     `${entries.length} entries total. ` +
-    `${noMappingCount} M-prefixed entr${noMappingCount === 1 ? "y" : "ies"} with no 1-prefixed sprite equivalent.`;
+    `${noMappingCount} M-prefixed entr${noMappingCount === 1 ? "y" : "ies"} with no 1-prefixed sprite equivalent. ` +
+    `Name fallbacks (not a real per-language translation) -- ${fallbackSummary}.`;
 
   const frag = document.createDocumentFragment();
   for (const entry of entries) {

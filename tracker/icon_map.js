@@ -137,3 +137,39 @@ function getSpritePositionForId(numericId) {
   const { sx, sy } = computeSpritePosition(spriteId);
   return { sx, sy, label: labelFor(code) };
 }
+
+// Localized item names, ported/derived from the original game's own name tables
+// (see tracker/item_names_en.js / item_names_ja.js / item_names_zhtw.js for
+// provenance). SUPPORTED_LANGS order also drives the settings-panel dropdown in
+// event_feed.js.
+const ITEM_NAME_TABLES = { en: ITEM_NAMES_EN, ja: ITEM_NAMES_JA, "zh-TW": ITEM_NAMES_ZHTW };
+const SUPPORTED_LANGS = ["en", "ja", "zh-TW"];
+const DEFAULT_LANG = "en";
+
+// Returns the localized display name for a numeric item id. "M"-prefixed codes
+// (this project's own "shared/either-game" bank) have no entry of their own in any
+// name table -- same as the sprite sheet, they're resolved by cross-referencing to
+// their "1"-prefixed equivalent id instead (see getSpritePositionForId above).
+// Falls back to English if the requested language has no entry for this id (covers
+// the ids intentionally left blank in one language's data), and finally to the
+// mechanical code-derived label if no real translation exists anywhere.
+function getItemNameForId(numericId, lang) {
+  const code = ITEM_ID_MAP[numericId];
+  let lookupId = numericId;
+  if (code && code.startsWith("M")) {
+    const equivalentId = CODE_TO_ID["1" + code.slice(1)];
+    if (equivalentId !== undefined) {
+      lookupId = equivalentId;
+    }
+  }
+
+  const table = ITEM_NAME_TABLES[lang];
+  if (table && table[lookupId] !== undefined) {
+    return table[lookupId];
+  }
+  const englishTable = ITEM_NAME_TABLES[DEFAULT_LANG];
+  if (englishTable && englishTable[lookupId] !== undefined) {
+    return englishTable[lookupId];
+  }
+  return getIconInfoForId(numericId).label;
+}

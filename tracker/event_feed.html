@@ -67,7 +67,8 @@
     gap: 0.4rem;
   }
   #settingsPanel input[type="text"],
-  #settingsPanel input[type="number"] {
+  #settingsPanel input[type="number"],
+  #settingsPanel select {
     background: #222;
     border: 1px solid #444;
     color: #eee;
@@ -105,11 +106,21 @@
       <input type="checkbox" id="settingsShowText" />
       Show item names
     </label>
+    <label>Item name language
+      <select id="settingsLang">
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+        <option value="zh-TW">繁體中文</option>
+      </select>
+    </label>
     <button id="settingsApply" type="button">Apply &amp; reload</button>
   </div>
 </div>
 <div id="log"></div>
 <script src="item_id_map.js"></script>
+<script src="item_names_en.js"></script>
+<script src="item_names_ja.js"></script>
+<script src="item_names_zhtw.js"></script>
 <script src="icon_map.js"></script>
 <script src="event_feed.js"></script>
 </body>
