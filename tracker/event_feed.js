@@ -196,6 +196,14 @@ function renderEntry(event, showText, lang, shareFlags) {
   for (const itemId of realItems) {
     const spritePos = getSpritePositionForId(itemId);
     const name = getItemNameForId(itemId, lang, shareFlags);
+    // getItemNameForId bakes the "[1] "/"[*] " game tag onto the front of
+    // `name`. Split it back off so it can render in its own fixed-width span
+    // (see .item-tag) -- digits like "1" and "3" render at different pixel
+    // widths in a proportional font even though they're the same character
+    // count, so without this the actual item text starts a few pixels off
+    // between rows tagged with different digits.
+    const tag = gameTagFor(ITEM_ID_MAP[itemId], shareFlags);
+    const bareName = tag ? name.slice(tag.length) : name;
     // Wrap each item's icon + label together as one flex item, so a wrapped
     // row (many items on a long event, or a narrow/zoomed-in window) only ever
     // breaks *between* items -- never between an icon and its own label,
@@ -222,7 +230,15 @@ function renderEntry(event, showText, lang, shareFlags) {
     if (showText) {
       const text = document.createElement("span");
       text.className = "item-label";
-      text.textContent = name;
+      if (tag) {
+        const tagSpan = document.createElement("span");
+        tagSpan.className = "item-tag";
+        tagSpan.textContent = tag.trim();
+        text.appendChild(tagSpan);
+      }
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = bareName;
+      text.appendChild(nameSpan);
       item.appendChild(text);
     }
     entry.appendChild(item);
