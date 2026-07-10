@@ -1,7 +1,9 @@
-import { orMergeBytes, countSetBits } from "./bits.js";
+import { orMergeBytes, countSetBits, setBit } from "./bits.js";
 import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
+import { shareCategoryForId, itemMergeSiblings } from "./shareCategories.js";
 
 const CHECKS_SEEN_LENGTH = 96;
+const ITEMS_LENGTH = 96;
 const MAX_EVENTS = 200;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
 const DUPLICATE_EVENT_WINDOW_MS = 15000;
@@ -70,6 +72,7 @@ export class RoomDO {
     await this.state.storage.put("adminSecret", body.adminSecret);
     await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
+    await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -106,6 +109,7 @@ export class RoomDO {
     await this.state.storage.put("resetEpoch", currentEpoch + 1);
     await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
+    await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -153,8 +157,9 @@ export class RoomDO {
       await this.state.storage.put("shareFlags", body.shareFlags);
     }
     const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
+    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
     await this.scheduleExpiry();
-    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch, shareFlags });
+    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch, shareFlags, mergedItems });
   }
 
   async handleEvent(request) {
@@ -191,6 +196,31 @@ export class RoomDO {
     if (newItems.length === 0) {
       // Every item in this request was a recent duplicate -- nothing new to log.
       return jsonResponse({ ok: true });
+    }
+
+    // Real cross-player item merging (checksSeen+item mode only): for each
+    // newly-accepted item whose category is enabled in this seed's
+    // shareFlags, OR its bit into all 3 titles' sibling ids so every
+    // player's next /sync grants it in their own game too.
+    if (mode === "checksSeen+item") {
+      const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
+      const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
+      let mergedChanged = false;
+      for (const itemId of newItems) {
+        const category = shareCategoryForId(itemId);
+        if (!category || !shareFlags[category]) continue;
+        for (const siblingId of itemMergeSiblings(itemId)) {
+          const byteIndex = Math.floor(siblingId / 8);
+          const mask = 1 << (siblingId % 8);
+          if ((mergedItems[byteIndex] & mask) === 0) {
+            setBit(mergedItems, siblingId);
+            mergedChanged = true;
+          }
+        }
+      }
+      if (mergedChanged) {
+        await this.state.storage.put("mergedItems", mergedItems);
+      }
     }
 
     const events = (await this.state.storage.get("events")) ?? [];

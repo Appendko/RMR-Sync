@@ -127,4 +127,32 @@ describe("RoomDO /sync", () => {
     const res = await sync(stub, new Array(96).fill(0), 0, { notARealFlag: true });
     expect(res.status).toBe(400);
   });
+
+  it("defaults to an empty mergedItems array before any shared item is picked up", async () => {
+    const stub = getStub("test-room-sync-11");
+    await initRoom(stub, "checksSeen+item");
+    const res = await sync(stub, new Array(96).fill(0), 0);
+    expect((await res.json()).mergedItems).toEqual(new Array(96).fill(0));
+  });
+
+  it("zeroes mergedItems on reset", async () => {
+    const stub = getStub("test-room-sync-12");
+    await initRoom(stub, "checksSeen+item");
+    await sync(stub, new Array(96).fill(0), 0, { subTank: true });
+    await stub.fetch("https://do/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player: "a", game: 1, items: [36] }),
+    });
+    const before = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(before.mergedItems.some((b) => b !== 0)).toBe(true);
+
+    await stub.fetch("https://do/admin/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminSecret: "test-secret" }),
+    });
+    const after = await (await sync(stub, new Array(96).fill(0), 1)).json();
+    expect(after.mergedItems).toEqual(new Array(96).fill(0));
+  });
 });
