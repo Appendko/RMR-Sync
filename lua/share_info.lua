@@ -84,6 +84,27 @@ local function writeChecksSeen(merged, forceOverwrite)
     end
 end
 
+-- Unlike writeChecksSeen, no currentTitle()/baseOffset slicing is needed:
+-- addrItems is already a flat, all-3-titles-simultaneously region (per
+-- boot.lua's own "全タイトル分" comment), so this is a straight 96-byte
+-- OR-loop. Written into both sessionSave.items (so a later, unrelated
+-- title switch doesn't lose it when boot.lua restores addrItems from its
+-- own sessionSave.items) and live RAM (immediate effect, confirmed
+-- sufficient by direct BizHawk testing: manually OR-ing a title's own item
+-- bit into WRAM after switching to it, with no reboot involved, was enough
+-- for the game to recognize the item as owned).
+local function writeMergedItems(merged, forceOverwrite)
+    for i = 0, 95 do
+        if forceOverwrite then
+            sessionSave.items[i] = merged[i + 1]
+            cpu[addrItems + i] = merged[i + 1]
+        else
+            sessionSave.items[i] = (sessionSave.items[i] or 0) | merged[i + 1]
+            cpu[addrItems + i] = cpu[addrItems + i] | merged[i + 1]
+        end
+    end
+end
+
 local function readItems()
     local arr = {}
     for i = 0, cItems - 1 do
@@ -150,6 +171,9 @@ local function tryConsumeInbox()
         local forceOverwrite = ShareLogic.shouldForceOverwrite(msg.sync.epoch, knownEpoch)
         knownEpoch = msg.sync.epoch
         writeChecksSeen(msg.sync.checksSeen, forceOverwrite)
+        if msg.sync.mergedItems then
+            writeMergedItems(msg.sync.mergedItems, forceOverwrite)
+        end
         pendingEvents = {}
         statusLine("synced (epoch " .. knownEpoch .. ")")
     else
