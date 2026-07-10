@@ -79,7 +79,25 @@ here looks off, check directly:
 - [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 
-## One-time setup
+## Two ways to deploy
+
+Pick whichever fits you: **Method 1** needs Node.js installed locally but
+gives you a fast local test/dev loop; **Method 2** needs only a GitHub
+account and a browser, no local install at all.
+
+There's a third option the Cloudflare dashboard offers — drag-and-drop
+zip/file upload, with no Git and no CLI — that's deliberately **not**
+documented here. That path is built mainly for static Pages-style assets,
+and it's unclear whether it correctly recreates the `ROOM` Durable Object
+binding and its SQLite migration the way both methods below do
+automatically from `wrangler.toml`. A manual upload risks ending up with a
+Worker that deploys fine but can't actually store room data, so only the
+two methods with confirmed, automatic binding/migration handling are
+covered.
+
+## Method 1: npm + wrangler CLI
+
+### One-time setup
 
 1. Install dependencies: `npm install`
 2. Log in: `npx wrangler login` (opens a browser to authorize)
@@ -88,21 +106,58 @@ here looks off, check directly:
    `https://dash.cloudflare.com/<your-account-id>/workers/subdomain`
    (find your account ID on the Workers & Pages overview page).
 
-## Local development
+### Local development
 
 `npm run dev` — runs the Worker locally (via `wrangler dev`), printing a
 `http://127.0.0.1:8787`-style URL you can test against directly.
 
-## Automated tests
+### Automated tests
 
 `npm test` — runs the Vitest suite against the Worker and Durable Object
 code in a simulated Workers runtime. Run this before every deploy.
 
-## Deploy
+### Deploy
 
 `npm run deploy` — publishes to `https://rmr-sync.<your-subdomain>.workers.dev`
 (the `rmr-sync` part comes from `name` in `wrangler.toml`; change it if you
 want a different name).
+
+## Method 2: Connect a GitHub repository (no Node.js required)
+
+Cloudflare's dashboard has a native Git-integration feature ("Workers
+Builds") that connects a GitHub repository directly to a Worker.
+Cloudflare's own infrastructure — not your computer — checks out the repo,
+parses `wrangler.toml`, provisions whatever it declares (including the
+`ROOM` Durable Object binding and its SQLite migration), and deploys. You
+only need a browser and a GitHub account; Node.js is never installed
+locally.
+
+1. Fork `Appendko/RMR-Sync` on GitHub (or push your own copy of this repo
+   to GitHub).
+2. In the Cloudflare dashboard: **Workers & Pages → Create → connect a Git
+   repository**, authorize the Cloudflare GitHub App, and pick the repo.
+3. When asked for the **root directory**, enter `worker` — this repo keeps
+   `wrangler.toml` in the `worker/` subdirectory, not the repo root, so this
+   is the one value you need to get right.
+4. Cloudflare parses `worker/wrangler.toml` and shows the resources it will
+   provision (the `ROOM` Durable Object binding and its SQLite migration) —
+   confirm and deploy.
+5. Copy the resulting `https://rmr-sync.<subdomain>.workers.dev` URL — same
+   next step as Method 1 (see "Point the mod at this backend" below).
+
+Notes:
+- Future pushes to the connected branch auto-redeploy by default — check
+  that Worker's build settings in the dashboard if you'd rather trigger
+  deploys manually instead.
+- `npm test` (the Vitest suite) doesn't run automatically in this flow —
+  fine for deploying unmodified code; only matters if you intend to edit
+  the Worker's source yourself, in which case Method 1's local test/dev
+  loop is more useful.
+- Verified as a current, documented Cloudflare feature via
+  [developers.cloudflare.com/workers/ci-cd/builds/](https://developers.cloudflare.com/workers/ci-cd/builds/)
+  and its
+  [GitHub integration page](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/) —
+  check those if the dashboard flow above has changed since this was written.
 
 ## Point the mod at this backend
 
