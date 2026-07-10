@@ -38,11 +38,20 @@ OR-merged arrays rather than one driving the other.)
 ## Key decisions
 
 - **Mode string**: `"checksSeen+item"` (replaces `"checksSeen+items"` in
-  `VALID_MODES` — see `worker/src/validation.js`). No migration path needed:
-  existing rooms' stored `mode` value is read from Durable Object storage,
-  never re-validated against `VALID_MODES` after creation, so this only
-  affects newly-created rooms. `checksSeen` (unchanged) and the future
-  `checksSeen+item+check` are the only other values.
+  `VALID_MODES` — see `worker/src/validation.js`). No *validation* migration
+  needed: an existing room's stored `mode` is read from Durable Object
+  storage and never re-validated against `VALID_MODES` after creation.
+  **However**, `handleEvent`'s mode gate is an equality check
+  (`mode !== "checksSeen+item"`), not a `VALID_MODES` lookup — a room still
+  holding the pre-rename string `"checksSeen+items"` (trailing `s`) will
+  fail that check and start rejecting `/event` with 403 after this ships
+  (and correspondingly, `share_info.lua`'s own `checkForNewItems` gate goes
+  dormant for that room too), even though `checksSeen` syncing keeps working
+  fine via `/sync` (which doesn't gate on the exact mode string). In
+  practice this only matters for a room actively straddling the deploy —
+  rooms auto-expire after 24h of inactivity, and resetting/recreating a room
+  with the new mode string clears it immediately. `checksSeen` (unchanged)
+  and the future `checksSeen+item+check` are the only other values.
 - **New room state: `mergedItems`** — a 96-byte array, identical shape to
   `checksSeen`, but modeled on `addrItems` (already a flat, all-3-titles-
   simultaneously region per `boot.lua`'s own layout) rather than
@@ -78,11 +87,17 @@ OR-merged arrays rather than one driving the other.)
   tag). A `checksSeen+item` room on a seed with, say, `sigmaKey: false`
   simply never merges Sigma Keys — respects the seed's own configuration
   rather than overriding it.
-- **`mergedItems` participates in the same `resetEpoch` protection as
-  `checksSeen`** — reset to all-zero on `/admin/reset`, and a client
-  reporting a stale epoch has its contribution to `mergedItems` discarded
-  the same way `checksSeen`'s is, for the same reason (a fresh run of the
-  same room shouldn't inherit a previous run's merges).
+- **`mergedItems` is protected across a reset, but not via the same
+  mechanism as `checksSeen`** — the client never sends `mergedItems` (it's
+  accumulated purely server-side from `/event`, which carries no epoch), so
+  there's no "stale client's contribution gets discarded" step to mirror for
+  it. Instead, protection is two-part: `/admin/reset` zeroes `mergedItems`
+  and bumps `resetEpoch`, and `lua/share_info.lua`'s `forceOverwrite` (set
+  when `checksSeen`'s epoch comparison detects a reset) also drives a direct
+  overwrite of the client's local `mergedItems` application on its next
+  sync — same trigger and same `forceOverwrite` flag as `checksSeen`, just
+  not the same "discard a client's own contribution" step, since
+  `mergedItems` never has one.
 - **`lua/share_info.lua` writes the merge into both `cpu[addrItems+i]`
   (immediate effect) and `sessionSave.items[i]` (durable persistence)** —
   mirroring exactly what `writeChecksSeen` already does for
