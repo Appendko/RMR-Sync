@@ -1,4 +1,4 @@
-const VALID_MODES = ["checksSeen", "checksSeen+items"];
+const VALID_MODES = ["checksSeen", "checksSeen+item"];
 const CHECKS_SEEN_LENGTH = 96;
 const SHARE_FLAG_KEYS = ["lifeUp", "energyUp", "armor", "subTank", "finalWeapon", "sigmaKey", "upgradeItem"];
 

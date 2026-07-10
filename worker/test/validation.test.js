@@ -4,13 +4,14 @@ import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSec
 describe("isValidMode", () => {
   it("accepts the two known modes", () => {
     expect(isValidMode("checksSeen")).toBe(true);
-    expect(isValidMode("checksSeen+items")).toBe(true);
+    expect(isValidMode("checksSeen+item")).toBe(true);
   });
 
   it("rejects anything else", () => {
     expect(isValidMode("items")).toBe(false);
     expect(isValidMode(undefined)).toBe(false);
     expect(isValidMode(123)).toBe(false);
+    expect(isValidMode("checksSeen+items")).toBe(false);
   });
 });
 

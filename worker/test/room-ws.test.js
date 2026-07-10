@@ -29,7 +29,7 @@ describe("RoomDO /ws", () => {
 
   it("sends mode and backlog on connect", async () => {
     const stub = getStub("test-room-ws-2");
-    await initRoom(stub, "checksSeen+items");
+    await initRoom(stub, "checksSeen+item");
     await stub.fetch("https://do/event", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -42,7 +42,7 @@ describe("RoomDO /ws", () => {
     ws.accept();
     const initMsg = await nextMessage(ws);
     expect(initMsg.type).toBe("init");
-    expect(initMsg.mode).toBe("checksSeen+items");
+    expect(initMsg.mode).toBe("checksSeen+item");
     expect(initMsg.backlog).toHaveLength(1);
     expect(initMsg.backlog[0].items).toEqual([0]);
     expect(initMsg.shareFlags).toEqual({});
@@ -51,7 +51,7 @@ describe("RoomDO /ws", () => {
 
   it("includes shareFlags reported by an earlier /sync call in the init message", async () => {
     const stub = getStub("test-room-ws-4");
-    await initRoom(stub, "checksSeen+items");
+    await initRoom(stub, "checksSeen+item");
     await stub.fetch("https://do/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -68,7 +68,7 @@ describe("RoomDO /ws", () => {
 
   it("broadcasts new events to connected sockets", async () => {
     const stub = getStub("test-room-ws-3");
-    await initRoom(stub, "checksSeen+items");
+    await initRoom(stub, "checksSeen+item");
 
     const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
     const ws = res.webSocket;

@@ -162,7 +162,7 @@ export class RoomDO {
     if (!mode) {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
-    if (mode !== "checksSeen+items") {
+    if (mode !== "checksSeen+item") {
       return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
     }
     const body = await request.json().catch(() => null);
