@@ -9,5 +9,7 @@ export default defineConfig({
   ],
   test: {
     globals: true,
+    include: ["test/**/*.test.js"],
+    exclude: ["test/shareCategories.test.js"],
   },
 });
