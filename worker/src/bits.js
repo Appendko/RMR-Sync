@@ -20,3 +20,12 @@ export function countSetBits(bytes) {
   }
   return count;
 }
+
+// Sets a single item id's bit in a byte array using the same packing
+// convention as checksSeen/mergedItems/addrItems: byte Math.floor(id/8),
+// bit (id % 8). Mutates `bytes` in place.
+export function setBit(bytes, id) {
+  const byteIndex = Math.floor(id / 8);
+  const mask = 1 << (id % 8);
+  bytes[byteIndex] = (bytes[byteIndex] | mask) & 0xff;
+}
