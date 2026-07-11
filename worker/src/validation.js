@@ -1,14 +1,30 @@
 const VALID_MODES = ["checksSeen", "checksSeen+item", "checksSeen+item+all"];
 const CHECKS_SEEN_LENGTH = 96;
+const ITEMS_LENGTH = 96;
 const SHARE_FLAG_KEYS = ["lifeUp", "energyUp", "armor", "subTank", "finalWeapon", "sigmaKey", "upgradeItem"];
 
 export function isValidMode(mode) {
   return VALID_MODES.includes(mode);
 }
 
-export function isValidChecksSeenArray(arr) {
-  if (!Array.isArray(arr) || arr.length !== CHECKS_SEEN_LENGTH) return false;
+// Both checksSeen and items are 96-byte arrays, one bit per id (byte
+// Math.floor(id/8), bit id % 8) -- shared validator, exposed under two
+// names so each call site stays self-documenting.
+function isValidByteArray(arr, length) {
+  if (!Array.isArray(arr) || arr.length !== length) return false;
   return arr.every((v) => Number.isInteger(v) && v >= 0 && v <= 255);
+}
+
+export function isValidChecksSeenArray(arr) {
+  return isValidByteArray(arr, CHECKS_SEEN_LENGTH);
+}
+
+// The client's full 96-byte item-ownership snapshot (lua/share_info.lua's
+// readItems(), reading addrItems directly -- already flat/all-3-titles, no
+// per-title slicing needed), sent on every /sync alongside checksSeen so
+// room.js's handleSync can OR-merge it across players into mergedItems.
+export function isValidItemsArray(arr) {
+  return isValidByteArray(arr, ITEMS_LENGTH);
 }
 
 export function validateEventBody(body) {

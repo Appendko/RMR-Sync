@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the three known modes", () => {
@@ -38,6 +38,31 @@ describe("isValidChecksSeenArray", () => {
   it("rejects non-arrays", () => {
     expect(isValidChecksSeenArray("not an array")).toBe(false);
     expect(isValidChecksSeenArray(null)).toBe(false);
+  });
+});
+
+describe("isValidItemsArray", () => {
+  it("accepts a 96-length array of byte values", () => {
+    expect(isValidItemsArray(new Array(96).fill(0))).toBe(true);
+  });
+
+  it("rejects wrong length", () => {
+    expect(isValidItemsArray(new Array(95).fill(0))).toBe(false);
+  });
+
+  it("rejects out-of-range or non-integer values", () => {
+    const bad1 = new Array(96).fill(0);
+    bad1[0] = 256;
+    expect(isValidItemsArray(bad1)).toBe(false);
+
+    const bad2 = new Array(96).fill(0);
+    bad2[0] = 1.5;
+    expect(isValidItemsArray(bad2)).toBe(false);
+  });
+
+  it("rejects non-arrays", () => {
+    expect(isValidItemsArray("not an array")).toBe(false);
+    expect(isValidItemsArray(null)).toBe(false);
   });
 });
 
