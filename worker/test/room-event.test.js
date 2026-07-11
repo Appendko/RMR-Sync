@@ -62,6 +62,17 @@ describe("RoomDO /event", () => {
     expect(status.eventCount).toBe(1);
   });
 
+  it("accepts and stores events when mode is checksSeen+item+all", async () => {
+    const stub = getStub("test-room-event-3b");
+    await initRoom(stub, "checksSeen+item+all");
+    const res = await postEvent(stub, { player: "a", game: 1, items: [0] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(1);
+  });
+
   it("rejects an invalid event body", async () => {
     const stub = getStub("test-room-event-4");
     await initRoom(stub, "checksSeen+item");
@@ -192,5 +203,27 @@ describe("RoomDO /event -- item merging (checksSeen+item mode)", () => {
     await postEvent(stub, { player: "a", game: 1, items: [40] }); // 1ItWeaponLO, no category
     const { mergedItems } = await (await sync(stub)).json();
     expect(mergedItems.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe("RoomDO /event -- item merging (checksSeen+item+all mode)", () => {
+  it("merges an item with no share category, with no shareFlags stored at all", async () => {
+    const stub = getStub("test-room-merge-all-1");
+    await initRoom(stub, "checksSeen+item+all");
+    await postEvent(stub, { player: "a", game: 1, items: [40] }); // 1ItWeaponLO, no category
+    const { mergedItems } = await (await sync(stub)).json();
+    expect(mergedItems[5] & 0x1).toBe(0x1); // id 40: byte 5, bit 0
+    expect(mergedItems[37] & 0x1).toBe(0x1); // id 296: byte 37, bit 0
+    expect(mergedItems[69] & 0x1).toBe(0x1); // id 552: byte 69, bit 0
+  });
+
+  it("still merges a shared-category pickup the same as checksSeen+item mode", async () => {
+    const stub = getStub("test-room-merge-all-2");
+    await initRoom(stub, "checksSeen+item+all");
+    await postEvent(stub, { player: "a", game: 1, items: [36] }); // 1ItSubtank1
+    const { mergedItems } = await (await sync(stub)).json();
+    expect(mergedItems[4] & 0x10).toBe(0x10); // id 36: byte 4, bit 4
+    expect(mergedItems[36] & 0x10).toBe(0x10); // id 292: byte 36, bit 4
+    expect(mergedItems[68] & 0x10).toBe(0x10); // id 548: byte 68, bit 4
   });
 });

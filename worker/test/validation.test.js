@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import { isValidMode, isValidChecksSeenArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
 
 describe("isValidMode", () => {
-  it("accepts the two known modes", () => {
+  it("accepts the three known modes", () => {
     expect(isValidMode("checksSeen")).toBe(true);
     expect(isValidMode("checksSeen+item")).toBe(true);
+    expect(isValidMode("checksSeen+item+all")).toBe(true);
   });
 
   it("rejects anything else", () => {

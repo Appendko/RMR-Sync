@@ -225,3 +225,47 @@ Lua never needs to send `mergedItems`, only receive it.
   picks up a shared item; confirm player B's game grants it (pause menu/
   usability, not just the event feed) within one `/sync` cycle, and that it
   survives player B switching titles away and back.
+
+## Addendum (2026-07-11): `checksSeen+item+all` mode
+
+Live-testing `checksSeen+item` confirmed the design works as intended —
+`shareCategoryForId`'s 7-category whitelist is exactly what `tracker/icon_map.js`'s
+`[*]` tag already marks as "shared" (see `gameTagFor`), so this mode is
+renamed at the display layer only (admin dropdown label
+"checksSeen + Share common Items"; the internal mode string, tests, and
+Worker logic are unchanged) to make that scope explicit ahead of a second
+tier.
+
+**New mode `checksSeen+item+all`**: the same OR-merge mechanism as
+`checksSeen+item`, but `handleEvent` skips the `shareCategoryForId`/
+`shareFlags` gate entirely — every newly-accepted item id merges its 3
+sibling ids unconditionally, including ranges the 7-category whitelist
+deliberately excludes (boss weapons, keys, stage-varied pickups, Vava-family,
+Ride Armor, Zero parts). This is an explicit, requested experiment: those
+ranges are excluded from `checksSeen+item` because "same slot number" isn't
+guaranteed to mean "same item" across X1/X2/X3 for them (each game's boss
+roster/key layout differs), so a merge can hand a player a bit belonging to
+an unrelated item in their own game. Consistent with the project's own
+established stance from the original subtank test ("take the item twice
+shouldn't be a problem"), the intent is to empirically test whether that
+mismatch causes any real in-game problem, not to assume it's safe upfront.
+
+**Changes**: `VALID_MODES` gains `"checksSeen+item+all"`
+(`worker/src/validation.js`); `handleEvent`'s mode gate and merge block both
+accept either `checksSeen+item` or `checksSeen+item+all`, branching only on
+whether the per-item category gate applies (`worker/src/room.js`);
+`lua/share_info.lua`'s `checkForNewItems` gate accepts either mode string;
+`admin/host_admin.html` gets a new dropdown option. No changes to
+`mergedItems`'s shape, reset/epoch protection, or `writeMergedItems` — those
+are mode-agnostic and already handle whatever bits `handleEvent` decides to
+set.
+
+**Verification**: extended `worker/test/room-event.test.js` with a
+`checksSeen+item+all`-mode describe block confirming (a) a no-category item
+merges its 3 sibling bits with no `shareFlags` stored at all, and (b) a
+whitelisted-category item still merges the same as under `checksSeen+item`.
+Manual BizHawk verification for this tier specifically: pick up a
+non-whitelisted item (e.g. a boss weapon) in one instance under
+`checksSeen+item+all` and confirm what actually happens in the other
+instance's game — this is the open experimental question, not an assumed-safe
+mechanism.

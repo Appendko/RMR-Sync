@@ -167,7 +167,7 @@ export class RoomDO {
     if (!mode) {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
-    if (mode !== "checksSeen+item") {
+    if (mode !== "checksSeen+item" && mode !== "checksSeen+item+all") {
       return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
     }
     const body = await request.json().catch(() => null);
@@ -198,17 +198,24 @@ export class RoomDO {
       return jsonResponse({ ok: true });
     }
 
-    // Real cross-player item merging (checksSeen+item mode only): for each
-    // newly-accepted item whose category is enabled in this seed's
-    // shareFlags, OR its bit into all 3 titles' sibling ids so every
-    // player's next /sync grants it in their own game too.
-    if (mode === "checksSeen+item") {
+    // Real cross-player item merging: for each newly-accepted item, OR its
+    // bit into all 3 titles' sibling ids so every player's next /sync grants
+    // it in their own game too. "checksSeen+item" gates each item by whether
+    // its category is enabled in this seed's shareFlags (same as before).
+    // "checksSeen+item+all" skips that gate entirely, merging every item id
+    // unconditionally -- including categories boot.lua itself never aligns
+    // across titles (boss weapons, keys, stage-varied, etc.), per an
+    // explicit request to test whether a mismatched "same slot" bit causes
+    // any real problem.
+    if (mode === "checksSeen+item" || mode === "checksSeen+item+all") {
       const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
       const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
       let mergedChanged = false;
       for (const itemId of newItems) {
-        const category = shareCategoryForId(itemId);
-        if (!category || !shareFlags[category]) continue;
+        if (mode === "checksSeen+item") {
+          const category = shareCategoryForId(itemId);
+          if (!category || !shareFlags[category]) continue;
+        }
         for (const siblingId of itemMergeSiblings(itemId)) {
           const byteIndex = Math.floor(siblingId / 8);
           const mask = 1 << (siblingId % 8);
