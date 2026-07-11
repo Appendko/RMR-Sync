@@ -390,3 +390,23 @@ other player (now via `/sync` instead of `/event`), confirm a
 non-whitelisted pickup under `checksSeen+item+all` reaches a player on the
 *same* title but not a player who has never visited it, and confirm survival
 across a title switch away and back.
+
+## Addendum (2026-07-11): wire mode strings renamed to match `boot.lua`'s vocabulary
+
+`checksSeen+item` (the whitelisted-category tier) is renamed to
+**`checksSeen+shared`** — it names the thing the tier actually merges: the
+ROM's own `shareLifeUp`/`shareSigmaKey`/etc. flags. `checksSeen+item+all`
+(the unconditional tier) is renamed to **`checksSeen+items`** — matching
+`sessionSave.items`/`addrItems`'s own naming directly, since "items" already
+unambiguously means the whole array in `boot.lua`'s own vocabulary, making
+the old "+all" suffix redundant. Nothing had shipped depending on the old
+strings, so this was a clean rename across `VALID_MODES`, `room.js`'s mode
+checks, `share_info.lua`'s `shareMode` comparisons, `host_admin.html`'s
+option values, and every test referencing these strings by name — no
+migration concern, unlike the earlier `checksSeen+items` (plural) →
+`checksSeen+item` (singular) rename this same spec documented above, which
+did have to account for an already-deployed mode gate. Display labels are
+unchanged by this rename (still read "Share common Items"/"Share All
+Items") — see `docs/superpowers/specs/2026-07-11-progress-mode-design.md`
+for the upcoming "Seen"-based display rename, which is a separate, later
+change.
