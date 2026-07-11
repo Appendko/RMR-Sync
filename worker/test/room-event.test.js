@@ -148,6 +148,28 @@ describe("RoomDO /event", () => {
     const statusAfterSecond = await (await stub.fetch("https://do/admin/status")).json();
     expect(statusAfterSecond.eventCount).toBe(1);
   });
+
+  it("accepts and stores events when mode is checksSeen+items+checks", async () => {
+    const stub = getStub("test-room-event-3c");
+    await initRoom(stub, "checksSeen+items+checks");
+    const res = await postEvent(stub, { player: "a", game: 1, checks: [0] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(1);
+  });
+
+  it("accepts an event with both items and checks", async () => {
+    const stub = getStub("test-room-event-3d");
+    await initRoom(stub, "checksSeen+items+checks");
+    const res = await postEvent(stub, { player: "a", game: 1, items: [0], checks: [0] });
+    expect(res.status).toBe(200);
+
+    const backlog = await getBacklog(stub);
+    expect(backlog[0].items).toEqual([0]);
+    expect(backlog[0].checks).toEqual([0]);
+  });
 });
 
 // mergedItems merging now happens exclusively via /sync's own `items` field
@@ -182,5 +204,29 @@ describe("RoomDO /event -- no longer merges items (moved to /sync)", () => {
     await postEvent(stub, { player: "a", game: 1, items: [40] }); // 1ItWeaponLO, no category
     const { mergedItems } = await (await sync(stub)).json();
     expect(mergedItems.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe("RoomDO /event -- duplicate-window keys namespaced by kind", () => {
+  it("does not treat an item id and a check id with the same number as duplicates of each other", async () => {
+    const stub = getStub("test-room-event-namespace-1");
+    await initRoom(stub, "checksSeen+items+checks");
+    await postEvent(stub, { player: "a", game: 1, items: [5] });
+    const res = await postEvent(stub, { player: "a", game: 1, checks: [5] });
+    expect(res.status).toBe(200);
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(2); // both logged -- not deduped against each other
+  });
+
+  it("still dedupes an immediate exact-duplicate check the same way items already are", async () => {
+    const stub = getStub("test-room-event-namespace-2");
+    await initRoom(stub, "checksSeen+items+checks");
+    await postEvent(stub, { player: "a", game: 1, checks: [9] });
+    const res = await postEvent(stub, { player: "a", game: 1, checks: [9] });
+    expect(res.status).toBe(200);
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(1);
   });
 });

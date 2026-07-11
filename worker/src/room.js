@@ -58,7 +58,7 @@ export class RoomDO {
   constructor(state) {
     this.state = state;
     this.sockets = new Set();
-    this.recentlyPostedItems = new Map(); // "player::itemId" -> last-posted timestamp (ms)
+    this.recentlyPosted = new Map(); // "player::kind::id" -> last-posted timestamp (ms)
   }
 
   async fetch(request) {
@@ -95,7 +95,7 @@ export class RoomDO {
   async alarm() {
     await this.state.storage.deleteAll();
     this.sockets.clear();
-    this.recentlyPostedItems.clear();
+    this.recentlyPosted.clear();
   }
 
   async handleInit(request) {
@@ -158,7 +158,7 @@ export class RoomDO {
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
-    this.recentlyPostedItems.clear();
+    this.recentlyPosted.clear();
     return jsonResponse({ ok: true, mode: newMode });
   }
 
@@ -175,7 +175,7 @@ export class RoomDO {
     await this.state.storage.deleteAlarm();
     await this.state.storage.deleteAll();
     this.sockets.clear();
-    this.recentlyPostedItems.clear();
+    this.recentlyPosted.clear();
     return jsonResponse({ deleted: true });
   }
 
@@ -235,7 +235,7 @@ export class RoomDO {
     if (!mode) {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
-    if (mode !== "checksSeen+shared" && mode !== "checksSeen+items") {
+    if (mode !== "checksSeen+shared" && mode !== "checksSeen+items" && mode !== "checksSeen+items+checks") {
       return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
     }
     const body = await request.json().catch(() => null);
@@ -245,29 +245,43 @@ export class RoomDO {
     }
     const now = Date.now();
     // Prune stale entries so this map doesn't grow unbounded over a long session.
-    for (const [key, postedAt] of this.recentlyPostedItems) {
+    for (const [key, postedAt] of this.recentlyPosted) {
       if (now - postedAt > DUPLICATE_EVENT_WINDOW_MS) {
-        this.recentlyPostedItems.delete(key);
+        this.recentlyPosted.delete(key);
       }
     }
 
-    const newItems = body.items.filter((itemId) => {
-      const key = `${body.player}::${itemId}`;
-      const lastPosted = this.recentlyPostedItems.get(key);
-      if (lastPosted !== undefined && now - lastPosted <= DUPLICATE_EVENT_WINDOW_MS) {
-        return false; // recent duplicate, skip it
-      }
-      this.recentlyPostedItems.set(key, now);
-      return true;
-    });
+    // Namespaced by kind ("item"/"check") since item ids and check ids share
+    // the same 0-767 numeric space -- without this, an item id and an
+    // unrelated check id with the same number would collide and incorrectly
+    // dedupe against each other.
+    const dedupeNew = (ids, kind) =>
+      (ids ?? []).filter((id) => {
+        const key = `${body.player}::${kind}::${id}`;
+        const lastPosted = this.recentlyPosted.get(key);
+        if (lastPosted !== undefined && now - lastPosted <= DUPLICATE_EVENT_WINDOW_MS) {
+          return false; // recent duplicate, skip it
+        }
+        this.recentlyPosted.set(key, now);
+        return true;
+      });
 
-    if (newItems.length === 0) {
-      // Every item in this request was a recent duplicate -- nothing new to log.
+    const newItems = dedupeNew(body.items, "item");
+    const newChecks = dedupeNew(body.checks, "check");
+
+    if (newItems.length === 0 && newChecks.length === 0) {
+      // Everything in this request was a recent duplicate -- nothing new to log.
       return jsonResponse({ ok: true });
     }
 
     const events = (await this.state.storage.get("events")) ?? [];
-    const event = { player: body.player, game: body.game, items: newItems, ts: now };
+    const event = { player: body.player, game: body.game, ts: now };
+    if (newItems.length > 0) {
+      event.items = newItems;
+    }
+    if (newChecks.length > 0) {
+      event.checks = newChecks;
+    }
     events.push(event);
     const trimmed = events.slice(-MAX_EVENTS);
     await this.state.storage.put("events", trimmed);
