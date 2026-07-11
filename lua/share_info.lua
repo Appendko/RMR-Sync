@@ -23,6 +23,7 @@ local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
 local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-acquired items; can trigger an early outbox write ahead of the heartbeat
 local cWaitFrames = 600 -- ~10s at 60fps: idle-only heartbeat (pulls others' checksSeen updates when nothing local has triggered a request) -- deliberately slow to reduce Worker/Durable-Object request volume for a real multi-player session; checksSeen sync has no real latency requirement
 local cStaleThreshold = 20 -- ~20 fast-cycles * ~0.2s = ~4s of genuine unresponsiveness before warning, matching the original user-facing timing despite ack-checking now running on the fast timer instead of the (now much slower) idle heartbeat
+local cInitBurstThreshold = 6 -- entering a title for the first time auto-initializes several item bits at once (observed ~8); a batch this size or larger is treated as initialization noise, not a real pickup, and isn't reported to the event feed
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -173,6 +174,11 @@ local function tryConsumeInbox()
         writeChecksSeen(msg.sync.checksSeen, forceOverwrite)
         if msg.sync.mergedItems then
             writeMergedItems(msg.sync.mergedItems, forceOverwrite)
+            -- Resync the diffing baseline to the real post-merge state, so
+            -- checkForNewItems() doesn't mistake a merge that just landed for
+            -- a genuine local pickup and report it as "this player got X" --
+            -- only real gameplay after this point should ever be reported.
+            previousItems = readItems()
         end
         pendingEvents = {}
         statusLine("synced (epoch " .. knownEpoch .. ")")
@@ -219,7 +225,7 @@ local function checkForNewItems()
     local items = readItems()
     if previousItems then
         local acquired = ShareLogic.diffNewBits(previousItems, items)
-        if #acquired > 0 then
+        if ShareLogic.shouldReportAcquired(#acquired, cInitBurstThreshold) then
             table.insert(pendingEvents, { game = currentTitle(), items = acquired })
             issueRequest()
         end

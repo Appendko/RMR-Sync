@@ -37,6 +37,16 @@ function ShareLogic.shouldForceOverwrite(responseEpoch, knownEpoch)
     return responseEpoch > knownEpoch
 end
 
+-- Should a batch of `count` simultaneously-acquired items be reported to the
+-- event feed? Entering a title for the first time auto-initializes several
+-- item bits at once, which looks identical to a real multi-item pickup from
+-- a raw bit diff alone -- a count threshold is the only signal available to
+-- tell "the game just initialized a fresh title" apart from "the player
+-- genuinely picked up a few things at once".
+function ShareLogic.shouldReportAcquired(count, threshold)
+    return count > 0 and count < threshold
+end
+
 -- Extracts the randomizer's unique Base64 seed value from a full Option
 -- string, so the room key stays short and stable even when boot.lua's
 -- own 128-byte ROM-read cap truncates sessionSave.param for an unusually

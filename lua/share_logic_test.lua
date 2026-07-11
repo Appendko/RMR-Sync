@@ -29,6 +29,13 @@ assertEqual(ShareLogic.shouldForceOverwrite(2, 1), true, "shouldForceOverwrite a
 assertEqual(ShareLogic.shouldForceOverwrite(1, 1), false, "shouldForceOverwrite equal")
 assertEqual(ShareLogic.shouldForceOverwrite(0, 1), false, "shouldForceOverwrite behind")
 
+-- shouldReportAcquired: skip empty batches and initialization-sized bursts
+assertEqual(ShareLogic.shouldReportAcquired(0, 6), false, "shouldReportAcquired empty batch")
+assertEqual(ShareLogic.shouldReportAcquired(1, 6), true, "shouldReportAcquired single item")
+assertEqual(ShareLogic.shouldReportAcquired(5, 6), true, "shouldReportAcquired just under threshold")
+assertEqual(ShareLogic.shouldReportAcquired(6, 6), false, "shouldReportAcquired at threshold")
+assertEqual(ShareLogic.shouldReportAcquired(8, 6), false, "shouldReportAcquired well over threshold")
+
 -- extractSeedKey: pulls the capital-S Base64 seed segment out of the Option
 -- string, surviving boot.lua's own truncation of the tail since the seed
 -- segment sits early in the string.
