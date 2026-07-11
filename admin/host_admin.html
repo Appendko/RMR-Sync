@@ -28,8 +28,8 @@
 <label for="mode">Share mode (used when creating or resetting the room)</label>
 <select id="mode">
   <option value="checksSeen">checksSeen only</option>
-  <option value="checksSeen+item">checksSeen + Share common Items</option>
-  <option value="checksSeen+item+all">checksSeen + Share All Items</option>
+  <option value="checksSeen+shared">checksSeen + Share common Items</option>
+  <option value="checksSeen+items">checksSeen + Share All Items</option>
 </select>
 
 <button id="createBtn">Create Room</button>
@@ -117,7 +117,7 @@ async function refreshStatus() {
     if (data.mode) {
       document.getElementById("mode").value = data.mode;
     }
-    const itemsLine = (data.mode === "checksSeen+item" || data.mode === "checksSeen+item+all")
+    const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items")
       ? `merged item bits set: ${data.mergedItemsBitsSet}\n`
       : "";
     showStatus(

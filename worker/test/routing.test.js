@@ -18,7 +18,7 @@ describe("Worker routing", () => {
     const initRes = await SELF.fetch("https://example.com/room/test-route-2/admin/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "checksSeen+item", adminSecret: "test-secret" }),
+      body: JSON.stringify({ mode: "checksSeen+shared", adminSecret: "test-secret" }),
     });
     expect(initRes.status).toBe(200);
     expect(initRes.headers.get("Access-Control-Allow-Origin")).toBe("*");

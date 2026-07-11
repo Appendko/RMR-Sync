@@ -25,7 +25,7 @@ describe("RoomDO admin lifecycle", () => {
   it("is idempotent on repeated init calls, ignoring the second caller's secret", async () => {
     const stub = getStub("test-room-init-2");
     await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "first-secret" });
-    const res = await postJson(stub, "/admin/init", { mode: "checksSeen+item", adminSecret: "second-secret" });
+    const res = await postJson(stub, "/admin/init", { mode: "checksSeen+shared", adminSecret: "second-secret" });
     expect(await res.json()).toEqual({ mode: "checksSeen", created: false });
   });
 
@@ -62,11 +62,11 @@ describe("RoomDO admin lifecycle", () => {
 
   it("resets checksSeen and events but keeps mode, given the correct admin secret", async () => {
     const stub = getStub("test-room-reset-1");
-    await postJson(stub, "/admin/init", { mode: "checksSeen+item", adminSecret: "s3cr3t" });
+    await postJson(stub, "/admin/init", { mode: "checksSeen+shared", adminSecret: "s3cr3t" });
     const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t" });
-    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+item" });
+    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+shared" });
     const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status).toEqual({ mode: "checksSeen+item", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(status).toEqual({ mode: "checksSeen+shared", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
   it("rejects reset with a missing or wrong admin secret", async () => {
@@ -89,10 +89,10 @@ describe("RoomDO admin lifecycle", () => {
   it("changes the stored mode when reset is given a valid new mode", async () => {
     const stub = getStub("test-room-reset-mode-1");
     await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
-    const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t", mode: "checksSeen+item" });
-    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+item" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t", mode: "checksSeen+shared" });
+    expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+shared" });
     const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status.mode).toBe("checksSeen+item");
+    expect(status.mode).toBe("checksSeen+shared");
   });
 
   it("rejects reset with an invalid mode and leaves state untouched", async () => {
@@ -108,7 +108,7 @@ describe("RoomDO admin lifecycle", () => {
   it("rejects reset with the wrong admin secret even if a valid mode is provided", async () => {
     const stub = getStub("test-room-reset-mode-3");
     await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "correct-secret" });
-    const res = await postJson(stub, "/admin/reset", { adminSecret: "wrong-secret", mode: "checksSeen+item" });
+    const res = await postJson(stub, "/admin/reset", { adminSecret: "wrong-secret", mode: "checksSeen+shared" });
     expect(res.status).toBe(403);
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status.mode).toBe("checksSeen");
@@ -116,7 +116,7 @@ describe("RoomDO admin lifecycle", () => {
 
   it("fully wipes a room on delete, given the correct admin secret", async () => {
     const stub = getStub("test-room-delete-1");
-    await postJson(stub, "/admin/init", { mode: "checksSeen+item", adminSecret: "s3cr3t" });
+    await postJson(stub, "/admin/init", { mode: "checksSeen+shared", adminSecret: "s3cr3t" });
     const res = await postJson(stub, "/admin/delete", { adminSecret: "s3cr3t" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ deleted: true });
@@ -153,10 +153,10 @@ describe("RoomDO auto-expiry", () => {
   it("schedules an alarm on room creation, and wipes storage when it fires", async () => {
     const id = env.ROOM.idFromName("test-room-expiry-1");
     const stub = env.ROOM.get(id);
-    await postJson(stub, "/admin/init", { mode: "checksSeen+item", adminSecret: "s3cr3t" });
+    await postJson(stub, "/admin/init", { mode: "checksSeen+shared", adminSecret: "s3cr3t" });
 
     const before = await stub.fetch("https://do/admin/status");
-    expect((await before.json()).mode).toBe("checksSeen+item");
+    expect((await before.json()).mode).toBe("checksSeen+shared");
 
     const ran = await runDurableObjectAlarm(stub);
     expect(ran).toBe(true);

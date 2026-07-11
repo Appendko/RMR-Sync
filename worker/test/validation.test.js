@@ -4,15 +4,15 @@ import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBo
 describe("isValidMode", () => {
   it("accepts the three known modes", () => {
     expect(isValidMode("checksSeen")).toBe(true);
-    expect(isValidMode("checksSeen+item")).toBe(true);
-    expect(isValidMode("checksSeen+item+all")).toBe(true);
+    expect(isValidMode("checksSeen+shared")).toBe(true);
+    expect(isValidMode("checksSeen+items")).toBe(true);
   });
 
   it("rejects anything else", () => {
     expect(isValidMode("items")).toBe(false);
     expect(isValidMode(undefined)).toBe(false);
     expect(isValidMode(123)).toBe(false);
-    expect(isValidMode("checksSeen+items")).toBe(false);
+    expect(isValidMode("checksSeen+item")).toBe(false);
   });
 });
 

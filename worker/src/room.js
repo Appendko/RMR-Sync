@@ -23,17 +23,17 @@ function jsonResponse(data, status = 200) {
 // "same slot number != same item across titles" risk for any item, in any
 // mode.
 function mergeIncomingItems(stored, incoming, mode, shareFlags) {
-  if (mode === "checksSeen+item+all") {
+  if (mode === "checksSeen+items") {
     // No category filter at all -- the entire array OR-merges unconditionally.
     return orMergeBytes(stored, incoming);
   }
-  if (mode !== "checksSeen+item") {
+  if (mode !== "checksSeen+shared") {
     // Plain "checksSeen" mode: items sharing isn't enabled for this room --
     // the field is still validated above (so a malformed client is still
     // caught), it's just never folded into mergedItems.
     return stored;
   }
-  // "checksSeen+item": only fold in bits whose id belongs to one of the 7
+  // "checksSeen+shared": only fold in bits whose id belongs to one of the 7
   // whitelisted categories AND that category is enabled in this room's
   // shareFlags. This must be bit-granular, not byte-granular: subTank's
   // range (0x24-0x27) does not start on a byte boundary, so the byte that
@@ -224,7 +224,7 @@ export class RoomDO {
     if (!mode) {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
-    if (mode !== "checksSeen+item" && mode !== "checksSeen+item+all") {
+    if (mode !== "checksSeen+shared" && mode !== "checksSeen+items") {
       return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
     }
     const body = await request.json().catch(() => null);

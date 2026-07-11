@@ -211,7 +211,7 @@ end
 -- (now-stale) response will be ignored by ShareLogic.isResponseFor, since its
 -- seq will no longer match the new outstandingSeq this function just set.
 local function checkForNewItems()
-    if shareMode ~= "checksSeen+item" and shareMode ~= "checksSeen+item+all" then
+    if shareMode ~= "checksSeen+shared" and shareMode ~= "checksSeen+items" then
         return
     end
     local progressFrame = cpu2[addrLastProgressFrame]

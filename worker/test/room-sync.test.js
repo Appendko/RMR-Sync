@@ -130,14 +130,14 @@ describe("RoomDO /sync", () => {
 
   it("defaults to an empty mergedItems array before any shared item is picked up", async () => {
     const stub = getStub("test-room-sync-11");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const res = await sync(stub, new Array(96).fill(0), 0);
     expect((await res.json()).mergedItems).toEqual(new Array(96).fill(0));
   });
 
   it("zeroes mergedItems on reset", async () => {
     const stub = getStub("test-room-sync-12");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const itemsWithSubTank = new Array(96).fill(0);
     itemsWithSubTank[4] = 0x10; // id 36, 1ItSubtank1
     await sync(stub, new Array(96).fill(0), 0, { subTank: true }, itemsWithSubTank);
@@ -153,9 +153,9 @@ describe("RoomDO /sync", () => {
     expect(after.mergedItems).toEqual(new Array(96).fill(0));
   });
 
-  it("OR-merges the full items array unconditionally across multiple players in checksSeen+item+all mode", async () => {
+  it("OR-merges the full items array unconditionally across multiple players in checksSeen+items mode", async () => {
     const stub = getStub("test-room-sync-13");
-    await initRoom(stub, "checksSeen+item+all");
+    await initRoom(stub, "checksSeen+items");
 
     const playerA = new Array(96).fill(0);
     playerA[4] = 0x10; // id 36
@@ -170,9 +170,9 @@ describe("RoomDO /sync", () => {
     expect(mergedItems[5]).toBe(0x01);
   });
 
-  it("checksSeen+item mode only merges whitelisted-category bits from the incoming items array", async () => {
+  it("checksSeen+shared mode only merges whitelisted-category bits from the incoming items array", async () => {
     const stub = getStub("test-room-sync-14");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const incoming = new Array(96).fill(0);
     incoming[4] = 0x10; // id 36, subTank -- whitelisted
     incoming[5] = 0x01; // id 40, 1ItWeaponLO -- no category, must NOT merge
@@ -184,7 +184,7 @@ describe("RoomDO /sync", () => {
 
   it("filters at bit granularity within a single byte -- subTank's range doesn't start on a byte boundary", async () => {
     const stub = getStub("test-room-sync-15");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const incoming = new Array(96).fill(0);
     incoming[4] = 0xff; // ids 32-39: 32-35 are the unused gap (no category), 36-39 are subTank
     await sync(stub, new Array(96).fill(0), 0, { subTank: true }, incoming);
@@ -194,7 +194,7 @@ describe("RoomDO /sync", () => {
 
   it("does not merge a category that's explicitly false in shareFlags", async () => {
     const stub = getStub("test-room-sync-16");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const incoming = new Array(96).fill(0);
     incoming[4] = 0x10; // id 36
     await sync(stub, new Array(96).fill(0), 0, { subTank: false }, incoming);
@@ -204,7 +204,7 @@ describe("RoomDO /sync", () => {
 
   it("does not merge a category with no shareFlags entry at all", async () => {
     const stub = getStub("test-room-sync-17");
-    await initRoom(stub, "checksSeen+item");
+    await initRoom(stub, "checksSeen+shared");
     const incoming = new Array(96).fill(0);
     incoming[4] = 0x10; // id 36
     await sync(stub, new Array(96).fill(0), 0, {}, incoming);
@@ -220,9 +220,9 @@ describe("RoomDO /sync", () => {
     expect(mergedItems.every((b) => b === 0)).toBe(true);
   });
 
-  it("discards a stale client's items contribution the same way it discards checksSeen (checksSeen+item+all mode)", async () => {
+  it("discards a stale client's items contribution the same way it discards checksSeen (checksSeen+items mode)", async () => {
     const stub = getStub("test-room-sync-19");
-    await initRoom(stub, "checksSeen+item+all");
+    await initRoom(stub, "checksSeen+items");
 
     const freshItems = new Array(96).fill(0);
     freshItems[4] = 0x10; // id 36
@@ -262,7 +262,7 @@ describe("RoomDO /sync", () => {
 
   it("reflects merged item bits in admin/status's mergedItemsBitsSet after a /sync merge", async () => {
     const stub = getStub("test-room-sync-21");
-    await initRoom(stub, "checksSeen+item+all");
+    await initRoom(stub, "checksSeen+items");
     const incoming = new Array(96).fill(0);
     incoming[4] = 0x10; // id 36
     await sync(stub, new Array(96).fill(0), 0, undefined, incoming);

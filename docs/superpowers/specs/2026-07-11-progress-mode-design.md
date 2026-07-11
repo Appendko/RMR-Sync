@@ -1,11 +1,11 @@
-# RMR Sync — `checksSeen+item+all+check` ("Seen + All Items + Progress") Mode Design Spec
+# RMR Sync — `checksSeen+items+checks` ("Seen + All Items + Progress") Mode Design Spec
 
 ## Context
 
 `docs/superpowers/specs/2026-07-10-item-merge-mode-design.md` (and its two
 addenda) shipped three room modes: `checksSeen` (scouted/hinted intel only),
-`checksSeen+item` (adds cross-player merging of the 7 whitelisted item
-categories), and `checksSeen+item+all` (merges every item unconditionally,
+`checksSeen+shared` (adds cross-player merging of the 7 whitelisted item
+categories), and `checksSeen+items` (merges every item unconditionally,
 cross-player, same-title — the mechanism that replaced the original
 `itemMergeSiblings` after it was confirmed to corrupt non-whitelisted items
 across titles).
@@ -18,8 +18,8 @@ items would sync as two independent, generically OR-merged arrays rather
 than one driving the other." That experiment is done — the mechanism works,
 and it's time to build the deferred tier.
 
-This spec adds a **fourth mode**, `checksSeen+item+all+check`, stacking only
-on top of `checksSeen+item+all` (not `checksSeen+item`): in addition to
+This spec adds a **fourth mode**, `checksSeen+items+checks`, stacking only
+on top of `checksSeen+items` (not `checksSeen+shared`): in addition to
 merging every item, it also merges every player's real **check**
 completion (`addrChecks`/`sessionSave.checks` — actual game progress, e.g.
 "defeated this boss," as opposed to `checksSeen`, which is just
@@ -31,11 +31,11 @@ separate follow-up spec, not this one).
 
 **User-facing rename, this spec only, display text only**: internal mode
 strings are unchanged everywhere except the one new addition
-(`checksSeen+item+all+check`). But the raw strings have never meant
+(`checksSeen+items+checks`). But the raw strings have never meant
 anything to a player who hasn't read `boot.lua` — `tracker/event_feed.js`'s
 connection status line prints `mode: ${data.mode}` verbatim
 (`event_feed.js:327`), so a regular player currently sees a bare
-`checksSeen+item` there. This spec adds a display-only friendly-name lookup
+`checksSeen+shared` there. This spec adds a display-only friendly-name lookup
 used at that one call site (and updates `admin/host_admin.html`'s already
 similarly-relabeled dropdown text) — the **wire values are not renamed**,
 only what a human reads:
@@ -43,9 +43,9 @@ only what a human reads:
 | Wire value | Displayed as |
 |---|---|
 | `checksSeen` | "Seen" |
-| `checksSeen+item` | "Seen + Common Items" |
-| `checksSeen+item+all` | "Seen + All Items" |
-| `checksSeen+item+all+check` | "Seen + All Items + Progress" |
+| `checksSeen+shared` | "Seen + Common Items" |
+| `checksSeen+items` | "Seen + All Items" |
+| `checksSeen+items+checks` | "Seen + All Items + Progress" |
 
 ## Key decisions
 
@@ -80,11 +80,11 @@ only what a human reads:
   optional, regardless of mode (a plain `checksSeen` room still validates
   it, just never folds it in), for the same reason `items` was made
   required: one validation code path, no mode-conditional wire shape.
-- **`checks` only merges in `checksSeen+item+all+check` mode, unconditionally
+- **`checks` only merges in `checksSeen+items+checks` mode, unconditionally
   (no category filter)** — checks aren't item-categorized at all (they're
   a much broader "any progress location" concept: "beat a boss, get an
   item, finish an intro stage"), so there's no equivalent of `shareFlags`
-  gating for them. This mirrors `checksSeen+item+all`'s philosophy: the
+  gating for them. This mirrors `checksSeen+items`'s philosophy: the
   tier that shares everything, shares everything. Same epoch-gated
   stale-contribution discard as `checksSeen`/`items` (the identical
   `body.epoch >= currentEpoch` block in `handleSync`, extended to also
@@ -93,7 +93,7 @@ only what a human reads:
   identically to checks.** A new `checkForNewChecks()` in
   `lua/share_info.lua` mirrors `checkForNewItems()`: diffs a new
   `previousChecks` baseline against a fresh `readChecks()`, gated to fire
-  only in `checksSeen+item+all+check` mode, filtered through the existing
+  only in `checksSeen+items+checks` mode, filtered through the existing
   `ShareLogic.shouldReportAcquired(count, threshold)` (reusing
   `cInitBurstThreshold`, unless live testing shows checks need their own
   separate threshold constant — start shared, split later if needed). And
@@ -111,8 +111,8 @@ only what a human reads:
   `validateEventBody` is relaxed to require at least one of `items`/
   `checks` to be a valid non-empty (1-20 entry) array of ids 0-767, rather
   than mandating `items` specifically. `/event`'s mode gate extends from
-  `mode !== "checksSeen+item" && mode !== "checksSeen+item+all"` to also
-  allow `checksSeen+item+all+check` through (a superset tier — it still
+  `mode !== "checksSeen+shared" && mode !== "checksSeen+items"` to also
+  allow `checksSeen+items+checks` through (a superset tier — it still
   wants item-pickup display too).
 - **Duplicate-event-window keys must be namespaced by kind.** The
   existing `recentlyPostedItems` map keys on `` `${player}::${itemId}` ``
@@ -128,10 +128,10 @@ only what a human reads:
   table so *something* readable shows up now, and builds the tooling
   needed to grow it into real names later.
 - **Item-merging in the new mode must behave exactly like
-  `checksSeen+item+all`.** `checksSeen+item+all+check` is a fourth,
-  independent string — it does not inherit `checksSeen+item+all`'s
+  `checksSeen+items`.** `checksSeen+items+checks` is a fourth,
+  independent string — it does not inherit `checksSeen+items`'s
   behavior automatically. Every existing conditional that currently
-  branches on `mode === "checksSeen+item+all"` for *item* merging
+  branches on `mode === "checksSeen+items"` for *item* merging
   (`mergeIncomingItems` in `worker/src/room.js`, and any similar mode
   check in `lua/share_info.lua`'s item-side logic) must be updated to
   treat the new mode identically for items — only `checks` merging is
@@ -141,7 +141,7 @@ only what a human reads:
 
 ## Backend changes (`worker/`)
 
-- `worker/src/validation.js`: `VALID_MODES` gains `"checksSeen+item+all+check"`.
+- `worker/src/validation.js`: `VALID_MODES` gains `"checksSeen+items+checks"`.
   New `isValidChecksArray` (mirrors `isValidItemsArray`). `validateEventBody`
   relaxed to accept `items` and/or `checks`.
 - `worker/src/room.js`: new `checks` state, threaded through
@@ -155,7 +155,7 @@ only what a human reads:
 New constant `addrChecks = 0x7FFF60`. New `readChecks()`/`writeChecks()`
 (verbatim copies of the checksSeen equivalents). New `previousChecks` local
 and `checkForNewChecks()` (verbatim copy of `checkForNewItems()`, gated to
-`checksSeen+item+all+check` only). `issueRequest()`'s outgoing payload gains
+`checksSeen+items+checks` only). `issueRequest()`'s outgoing payload gains
 `checks = readChecks()`. `tryConsumeInbox()` applies `writeChecks` and
 resyncs `previousChecks`, mirroring the items merge-echo fix.
 
@@ -197,7 +197,7 @@ common Items").
 
 ## Not changing
 
-- `checksSeen+item` and `checksSeen+item+all` are unaffected — `checks`
+- `checksSeen+shared` and `checksSeen+items` are unaffected — `checks`
   merging is exclusive to the new 4th tier.
 - No changes to `mergedItems`'s own mechanism, shape, or the item-merge
   fixes already shipped.
@@ -212,7 +212,7 @@ common Items").
 - Extend `worker/test/validation.test.js` for `isValidChecksArray` and the
   relaxed `validateEventBody`.
 - Extend `worker/test/room-sync.test.js` for: `checks` OR-merging
-  unconditionally in `checksSeen+item+all+check` mode; `checks` validated
+  unconditionally in `checksSeen+items+checks` mode; `checks` validated
   but never folded in the other 3 modes; stale-epoch discard for `checks`
   matching `checksSeen`/`items`; reset zeroing `checks`.
 - Extend `worker/test/room-event.test.js` for: a `checks`-only event body
