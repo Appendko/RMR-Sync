@@ -27,9 +27,10 @@
 
 <label for="mode">Share mode (used when creating or resetting the room)</label>
 <select id="mode">
-  <option value="checksSeen">checksSeen only</option>
-  <option value="checksSeen+shared">checksSeen + Share common Items</option>
-  <option value="checksSeen+items">checksSeen + Share All Items</option>
+  <option value="checksSeen">Seen</option>
+  <option value="checksSeen+shared">Seen + Common Items</option>
+  <option value="checksSeen+items">Seen + All Items</option>
+  <option value="checksSeen+items+checks">Seen + All Items + Progress</option>
 </select>
 
 <button id="createBtn">Create Room</button>
@@ -117,13 +118,17 @@ async function refreshStatus() {
     if (data.mode) {
       document.getElementById("mode").value = data.mode;
     }
-    const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items")
+    const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items" || data.mode === "checksSeen+items+checks")
       ? `merged item bits set: ${data.mergedItemsBitsSet}\n`
+      : "";
+    const checksLine = (data.mode === "checksSeen+items+checks")
+      ? `merged checks bits set: ${data.checksBitsSet}\n`
       : "";
     showStatus(
       `mode: ${data.mode ?? "(not created yet)"}\n` +
       `checksSeen bits set: ${data.checksSeenBitsSet}\n` +
       itemsLine +
+      checksLine +
       `event count: ${data.eventCount}\n` +
       `connected trackers: ${data.connected}`,
       false
