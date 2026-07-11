@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RMR Sync — Check Name Audit (diagnostic, not player-facing)</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+  h1 { font-size: 1.2rem; }
+  p.note { font-size: 0.85rem; color: #999; }
+  #controls { margin-bottom: 1rem; }
+  #controls input[type="text"] { padding: 0.3rem 0.5rem; font-size: 0.95rem; min-width: 220px; }
+  #stats { font-size: 0.85rem; color: #999; margin-bottom: 0.8rem; }
+  table { border-collapse: collapse; width: 100%; }
+  thead th { text-align: left; position: sticky; top: 0; background: #111; border-bottom: 1px solid #444; padding: 0.4rem 0.6rem; font-size: 0.85rem; color: #ccc; }
+  tbody tr { border-bottom: 1px solid #222; }
+  tbody tr.hidden { display: none; }
+  td { padding: 0.4rem 0.6rem; vertical-align: middle; font-size: 0.9rem; }
+  td.id-cell { width: 3.5rem; color: #999; }
+  td.code-cell { font-family: monospace; }
+  td.name-cell { max-width: 220px; }
+  td.name-cell.name-fallback { color: #f88; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>RMR Sync — Check Name Audit</h1>
+<p class="note">
+  Standalone diagnostic/authoring page. Not linked from the player-facing UI. Each row is one
+  real check-completion id, alongside its raw ported short code (from the original AutoTracker
+  project's own id map) and each language's current name. Cells in red italics have no name
+  authored yet, showing the raw code as a fallback -- edit
+  <code>tracker/check_names_en.js</code> / <code>_ja.js</code> / <code>_zhtw.js</code> to fill
+  these in.
+</p>
+<div id="controls">
+  <input type="text" id="filterInput" placeholder="Filter by short code substring…" autocomplete="off" />
+</div>
+<div id="stats"></div>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Short code</th>
+      <th>EN name</th>
+      <th>JA name</th>
+      <th>zh-TW name</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<script src="check_id_map.js"></script>
+<script src="check_names_en.js"></script>
+<script src="check_names_ja.js"></script>
+<script src="check_names_zhtw.js"></script>
+<script src="check_lookup.js"></script>
+<script src="check_audit.js"></script>
+</body>
+</html>
