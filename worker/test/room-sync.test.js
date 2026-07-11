@@ -14,11 +14,11 @@ async function initRoom(stub, mode) {
   });
 }
 
-function sync(stub, checksSeen, epoch, shareFlags) {
+function sync(stub, checksSeen, epoch, shareFlags, items = new Array(96).fill(0)) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen, epoch, shareFlags }),
+    body: JSON.stringify({ checksSeen, epoch, shareFlags, items }),
   });
 }
 
@@ -138,14 +138,11 @@ describe("RoomDO /sync", () => {
   it("zeroes mergedItems on reset", async () => {
     const stub = getStub("test-room-sync-12");
     await initRoom(stub, "checksSeen+item");
-    await sync(stub, new Array(96).fill(0), 0, { subTank: true });
-    await stub.fetch("https://do/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ player: "a", game: 1, items: [36] }),
-    });
+    const itemsWithSubTank = new Array(96).fill(0);
+    itemsWithSubTank[4] = 0x10; // id 36, 1ItSubtank1
+    await sync(stub, new Array(96).fill(0), 0, { subTank: true }, itemsWithSubTank);
     const before = await (await sync(stub, new Array(96).fill(0), 0)).json();
-    expect(before.mergedItems.some((b) => b !== 0)).toBe(true);
+    expect(before.mergedItems[4] & 0x10).toBe(0x10);
 
     await stub.fetch("https://do/admin/reset", {
       method: "POST",
@@ -154,5 +151,122 @@ describe("RoomDO /sync", () => {
     });
     const after = await (await sync(stub, new Array(96).fill(0), 1)).json();
     expect(after.mergedItems).toEqual(new Array(96).fill(0));
+  });
+
+  it("OR-merges the full items array unconditionally across multiple players in checksSeen+item+all mode", async () => {
+    const stub = getStub("test-room-sync-13");
+    await initRoom(stub, "checksSeen+item+all");
+
+    const playerA = new Array(96).fill(0);
+    playerA[4] = 0x10; // id 36
+    await sync(stub, new Array(96).fill(0), 0, undefined, playerA);
+
+    const playerB = new Array(96).fill(0);
+    playerB[5] = 0x01; // id 40, 1ItWeaponLO -- no category, and that's fine in "+all" mode
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, playerB);
+
+    const { mergedItems } = await res.json();
+    expect(mergedItems[4]).toBe(0x10);
+    expect(mergedItems[5]).toBe(0x01);
+  });
+
+  it("checksSeen+item mode only merges whitelisted-category bits from the incoming items array", async () => {
+    const stub = getStub("test-room-sync-14");
+    await initRoom(stub, "checksSeen+item");
+    const incoming = new Array(96).fill(0);
+    incoming[4] = 0x10; // id 36, subTank -- whitelisted
+    incoming[5] = 0x01; // id 40, 1ItWeaponLO -- no category, must NOT merge
+    await sync(stub, new Array(96).fill(0), 0, { subTank: true }, incoming);
+    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(mergedItems[4]).toBe(0x10);
+    expect(mergedItems[5]).toBe(0x00);
+  });
+
+  it("filters at bit granularity within a single byte -- subTank's range doesn't start on a byte boundary", async () => {
+    const stub = getStub("test-room-sync-15");
+    await initRoom(stub, "checksSeen+item");
+    const incoming = new Array(96).fill(0);
+    incoming[4] = 0xff; // ids 32-39: 32-35 are the unused gap (no category), 36-39 are subTank
+    await sync(stub, new Array(96).fill(0), 0, { subTank: true }, incoming);
+    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(mergedItems[4]).toBe(0xf0); // only bits 4-7 (ids 36-39) merged; bits 0-3 (ids 32-35) must not be
+  });
+
+  it("does not merge a category that's explicitly false in shareFlags", async () => {
+    const stub = getStub("test-room-sync-16");
+    await initRoom(stub, "checksSeen+item");
+    const incoming = new Array(96).fill(0);
+    incoming[4] = 0x10; // id 36
+    await sync(stub, new Array(96).fill(0), 0, { subTank: false }, incoming);
+    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(mergedItems.every((b) => b === 0)).toBe(true);
+  });
+
+  it("does not merge a category with no shareFlags entry at all", async () => {
+    const stub = getStub("test-room-sync-17");
+    await initRoom(stub, "checksSeen+item");
+    const incoming = new Array(96).fill(0);
+    incoming[4] = 0x10; // id 36
+    await sync(stub, new Array(96).fill(0), 0, {}, incoming);
+    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(mergedItems.every((b) => b === 0)).toBe(true);
+  });
+
+  it("never merges items in plain checksSeen mode, even given a fully-set incoming array", async () => {
+    const stub = getStub("test-room-sync-18");
+    await initRoom(stub, "checksSeen");
+    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0xff));
+    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(mergedItems.every((b) => b === 0)).toBe(true);
+  });
+
+  it("discards a stale client's items contribution the same way it discards checksSeen (checksSeen+item+all mode)", async () => {
+    const stub = getStub("test-room-sync-19");
+    await initRoom(stub, "checksSeen+item+all");
+
+    const freshItems = new Array(96).fill(0);
+    freshItems[4] = 0x10; // id 36
+    await sync(stub, new Array(96).fill(0), 0, undefined, freshItems);
+
+    await stub.fetch("https://do/admin/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminSecret: "test-secret" }),
+    });
+
+    const staleItems = new Array(96).fill(0);
+    staleItems[5] = 0x01; // id 40, this player's own already-known bit, from before the reset
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, staleItems); // still reporting epoch 0
+
+    const data = await res.json();
+    expect(data.epoch).toBe(1); // room moved on to epoch 1
+    expect(data.mergedItems.every((b) => b === 0)).toBe(true); // stale contribution NOT merged in
+
+    const res2 = await sync(stub, new Array(96).fill(0), 1, undefined, new Array(96).fill(0));
+    expect((await res2.json()).mergedItems.every((b) => b === 0)).toBe(true);
+  });
+
+  it("rejects a sync missing the items field, or with the wrong length", async () => {
+    const stub = getStub("test-room-sync-20");
+    await initRoom(stub, "checksSeen");
+    const res1 = await stub.fetch("https://do/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), epoch: 0 }), // no items at all
+    });
+    expect(res1.status).toBe(400);
+
+    const res2 = await sync(stub, new Array(96).fill(0), 0, undefined, [0, 1, 2]);
+    expect(res2.status).toBe(400);
+  });
+
+  it("reflects merged item bits in admin/status's mergedItemsBitsSet after a /sync merge", async () => {
+    const stub = getStub("test-room-sync-21");
+    await initRoom(stub, "checksSeen+item+all");
+    const incoming = new Array(96).fill(0);
+    incoming[4] = 0x10; // id 36
+    await sync(stub, new Array(96).fill(0), 0, undefined, incoming);
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.mergedItemsBitsSet).toBe(1);
   });
 });

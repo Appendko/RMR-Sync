@@ -1,6 +1,6 @@
 import { orMergeBytes, countSetBits, setBit } from "./bits.js";
-import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
-import { shareCategoryForId, itemMergeSiblings } from "./shareCategories.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidItemsArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
+import { shareCategoryForId } from "./shareCategories.js";
 
 const CHECKS_SEEN_LENGTH = 96;
 const ITEMS_LENGTH = 96;
@@ -13,6 +13,44 @@ function jsonResponse(data, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// Cross-PLAYER, same-byte-position OR-merge of one client's full 96-byte
+// items snapshot into the room's stored mergedItems. This NEVER projects a
+// bit from one title's byte range into another title's byte range (unlike
+// the old, deleted itemMergeSiblings sibling-projection) -- it's a straight
+// per-title, per-byte-position merge across players, so there is no more
+// "same slot number != same item across titles" risk for any item, in any
+// mode.
+function mergeIncomingItems(stored, incoming, mode, shareFlags) {
+  if (mode === "checksSeen+item+all") {
+    // No category filter at all -- the entire array OR-merges unconditionally.
+    return orMergeBytes(stored, incoming);
+  }
+  if (mode !== "checksSeen+item") {
+    // Plain "checksSeen" mode: items sharing isn't enabled for this room --
+    // the field is still validated above (so a malformed client is still
+    // caught), it's just never folded into mergedItems.
+    return stored;
+  }
+  // "checksSeen+item": only fold in bits whose id belongs to one of the 7
+  // whitelisted categories AND that category is enabled in this room's
+  // shareFlags. This must be bit-granular, not byte-granular: subTank's
+  // range (0x24-0x27) does not start on a byte boundary, so the byte that
+  // holds subTank ids 36-39 also holds the unrelated, unwhitelisted ids
+  // 32-35 -- merging the whole byte would incorrectly pull those in too.
+  const merged = stored.slice();
+  for (let id = 0; id < ITEMS_LENGTH * 8; id++) {
+    const byteIndex = Math.floor(id / 8);
+    const mask = 1 << (id % 8);
+    if ((incoming[byteIndex] & mask) === 0) continue; // not set in this client's snapshot
+    const category = shareCategoryForId(id);
+    if (!category || !shareFlags[category]) continue; // not whitelisted, or not enabled
+    if ((merged[byteIndex] & mask) === 0) {
+      setBit(merged, id);
+    }
+  }
+  return merged;
 }
 
 export class RoomDO {
@@ -142,26 +180,43 @@ export class RoomDO {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
     const body = await request.json().catch(() => null);
-    if (!body || !isValidChecksSeenArray(body.checksSeen) || !isValidEpoch(body.epoch) || !isValidShareFlags(body.shareFlags)) {
-      return jsonResponse({ error: "invalid checksSeen, epoch, or shareFlags" }, 400);
+    if (
+      !body ||
+      !isValidChecksSeenArray(body.checksSeen) ||
+      !isValidItemsArray(body.items) ||
+      !isValidEpoch(body.epoch) ||
+      !isValidShareFlags(body.shareFlags)
+    ) {
+      return jsonResponse({ error: "invalid checksSeen, items, epoch, or shareFlags" }, 400);
     }
     const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
-    const stored = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
+    const storedChecksSeen = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
+    const storedMergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
 
-    let merged = stored;
-    if (body.epoch >= currentEpoch) {
-      merged = orMergeBytes(stored, body.checksSeen);
-      await this.state.storage.put("checksSeen", merged);
-    }
     // Static per-seed data (read once from ROM by lua/share_info.lua, not derived
     // from player progress) -- just store whatever's sent, no merge logic needed.
     if (body.shareFlags !== undefined) {
       await this.state.storage.put("shareFlags", body.shareFlags);
     }
     const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
-    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
+
+    let checksSeen = storedChecksSeen;
+    let mergedItems = storedMergedItems;
+    // A client reporting a stale (pre-reset) epoch has its contribution to
+    // BOTH arrays discarded -- checksSeen has always had this protection;
+    // items now needs it too, since items is client-supplied on every /sync
+    // as of this change (previously mergedItems was accumulated purely
+    // server-side from /event, which carried no epoch, so this gate never
+    // applied to it).
+    if (body.epoch >= currentEpoch) {
+      checksSeen = orMergeBytes(storedChecksSeen, body.checksSeen);
+      await this.state.storage.put("checksSeen", checksSeen);
+      mergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
+      await this.state.storage.put("mergedItems", mergedItems);
+    }
+
     await this.scheduleExpiry();
-    return jsonResponse({ mode, checksSeen: merged, epoch: currentEpoch, shareFlags, mergedItems });
+    return jsonResponse({ mode, checksSeen, epoch: currentEpoch, shareFlags, mergedItems });
   }
 
   async handleEvent(request) {
@@ -198,38 +253,6 @@ export class RoomDO {
     if (newItems.length === 0) {
       // Every item in this request was a recent duplicate -- nothing new to log.
       return jsonResponse({ ok: true });
-    }
-
-    // Real cross-player item merging: for each newly-accepted item, OR its
-    // bit into all 3 titles' sibling ids so every player's next /sync grants
-    // it in their own game too. "checksSeen+item" gates each item by whether
-    // its category is enabled in this seed's shareFlags (same as before).
-    // "checksSeen+item+all" skips that gate entirely, merging every item id
-    // unconditionally -- including categories boot.lua itself never aligns
-    // across titles (boss weapons, keys, stage-varied, etc.), per an
-    // explicit request to test whether a mismatched "same slot" bit causes
-    // any real problem.
-    if (mode === "checksSeen+item" || mode === "checksSeen+item+all") {
-      const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
-      const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
-      let mergedChanged = false;
-      for (const itemId of newItems) {
-        if (mode === "checksSeen+item") {
-          const category = shareCategoryForId(itemId);
-          if (!category || !shareFlags[category]) continue;
-        }
-        for (const siblingId of itemMergeSiblings(itemId)) {
-          const byteIndex = Math.floor(siblingId / 8);
-          const mask = 1 << (siblingId % 8);
-          if ((mergedItems[byteIndex] & mask) === 0) {
-            setBit(mergedItems, siblingId);
-            mergedChanged = true;
-          }
-        }
-      }
-      if (mergedChanged) {
-        await this.state.storage.put("mergedItems", mergedItems);
-      }
     }
 
     const events = (await this.state.storage.get("events")) ?? [];
