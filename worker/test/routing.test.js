@@ -26,7 +26,7 @@ describe("Worker routing", () => {
     const syncRes = await SELF.fetch("https://example.com/room/test-route-2/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0 }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch: 0 }),
     });
     expect(syncRes.status).toBe(200);
 

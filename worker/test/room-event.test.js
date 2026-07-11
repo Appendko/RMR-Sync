@@ -158,7 +158,7 @@ function sync(stub, epoch = 0) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch }),
+    body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch }),
   });
 }
 
@@ -169,7 +169,7 @@ describe("RoomDO /event -- no longer merges items (moved to /sync)", () => {
     await stub.fetch("https://do/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0, shareFlags: { subTank: true } }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch: 0, shareFlags: { subTank: true } }),
     });
     await postEvent(stub, { player: "a", game: 1, items: [36] }); // 1ItSubtank1
     const { mergedItems } = await (await sync(stub)).json();
