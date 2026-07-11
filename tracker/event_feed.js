@@ -219,7 +219,7 @@ function renderEntry(event, showText, lang, shareFlags, showItems, showChecks) {
   // render an entry line at all if every item AND every check in this event
   // turns out to be empty (either unnamed bits, or the kind was turned off via
   // the showItems/showChecks settings-panel checkboxes).
-  const realItems = showItems ? event.items.filter((itemId) => ITEM_ID_MAP[itemId] !== undefined) : [];
+  const realItems = showItems ? (event.items || []).filter((itemId) => ITEM_ID_MAP[itemId] !== undefined) : [];
   const realChecks = showChecks ? (event.checks || []).filter((checkId) => CHECK_ID_MAP[checkId] !== undefined) : [];
   if (realItems.length === 0 && realChecks.length === 0) {
     return null;
