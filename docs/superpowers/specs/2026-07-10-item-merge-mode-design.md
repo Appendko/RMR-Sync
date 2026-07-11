@@ -366,3 +366,27 @@ corruption in the first place. A future spec could reintroduce
 same-conceptual-item sharing across titles for the 7 whitelisted categories
 specifically (where "same slot" genuinely does mean "same item"), but that
 is out of scope here.
+
+**Verification**: `worker/test/room-sync.test.js` gained dedicated coverage
+for the new mechanism: `checksSeen+item+all` OR-merging the full array
+unconditionally across two different players; `checksSeen+item` merging
+only whitelisted-category bits and leaving everything else untouched; the
+bit-granularity boundary case itself (a fully-set byte 4, asserting only
+bits 4-7/subTank fold in and bits 0-3/the unused gap do not); a disabled or
+absent `shareFlags` entry blocking a merge; plain `checksSeen` mode never
+merging even a fully-set incoming array; a stale-epoch `/sync` having its
+`items` contribution discarded the same way `checksSeen`'s already was; a
+missing or wrong-length `items` field being rejected with 400; and
+`admin/status`'s `mergedItemsBitsSet` reflecting a merge performed via
+`/sync`. `worker/test/room-event.test.js` gained regression tests confirming
+`/event` no longer changes `mergedItems` at all, for both tiers. No
+automated test exists for `lua/share_info.lua` itself (unchanged from the
+original design — verified by syntax check and the existing
+`share_logic_test.lua`/`file_relay_test.lua` suites, consistent with how
+this file has always been verified). Manual BizHawk verification still
+needed, matching this spec's original "Verification" section: two instances
+in the same room, confirm a whitelisted-category pickup still reaches the
+other player (now via `/sync` instead of `/event`), confirm a
+non-whitelisted pickup under `checksSeen+item+all` reaches a player on the
+*same* title but not a player who has never visited it, and confirm survival
+across a title switch away and back.
