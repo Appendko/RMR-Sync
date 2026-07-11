@@ -11,6 +11,7 @@ require "config"
 
 local cChecksPerTitle = 0x20
 local addrChecksSeen = 0x7FFF80
+local addrChecks = 0x7FFF60
 local addrItems = 0x7FFF00
 local addrLastProgressFrame = 0x7E0244
 local cItems = 0x60
@@ -114,6 +115,38 @@ local function readItems()
     return arr
 end
 
+local function readChecks()
+    local arr = {}
+    for i = 0, 95 do
+        arr[i + 1] = sessionSave.checks[i] or 0
+    end
+    return arr
+end
+
+-- Verbatim copy of writeChecksSeen's OR/overwrite + currentTitle()/baseOffset
+-- slicing pattern, applied to real check-completion progress instead of
+-- scouted/hinted visibility. addrChecks (0x7FFF60) is a reused 32-byte WRAM
+-- window per title, same as addrChecksSeen -- unlike addrItems, this needs
+-- the slicing.
+local function writeChecks(merged, forceOverwrite)
+    for i = 0, 95 do
+        if forceOverwrite then
+            sessionSave.checks[i] = merged[i + 1]
+        else
+            sessionSave.checks[i] = (sessionSave.checks[i] or 0) | merged[i + 1]
+        end
+    end
+    local title = currentTitle()
+    local baseOffset = (title - 1) * cChecksPerTitle
+    for i = 0, cChecksPerTitle - 1 do
+        if forceOverwrite then
+            cpu[addrChecks + i] = merged[baseOffset + i + 1]
+        else
+            cpu[addrChecks + i] = cpu[addrChecks + i] | merged[baseOffset + i + 1]
+        end
+    end
+end
+
 local cfg, cfgErr = ShareConfig.load("share_config.txt")
 if not cfg then
     error("share_info.lua: " .. cfgErr)
@@ -142,7 +175,9 @@ local outstandingSeq = nil
 local pendingEvents = {}
 local shareMode = nil
 local previousItems = nil
+local previousChecks = nil
 local previousProgressFrame = nil
+local previousProgressFrameForChecks = nil
 local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
@@ -180,6 +215,11 @@ local function tryConsumeInbox()
             -- only real gameplay after this point should ever be reported.
             previousItems = readItems()
         end
+        if msg.sync.checks then
+            writeChecks(msg.sync.checks, forceOverwrite)
+            -- Same merge-echo fix as items, applied to checks.
+            previousChecks = readChecks()
+        end
         pendingEvents = {}
         statusLine("synced (epoch " .. knownEpoch .. ")")
     else
@@ -198,7 +238,7 @@ local function issueRequest()
         workerUrl = cfg.worker_url,
         roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
-        sync = { checksSeen = readChecksSeen(), items = readItems(), epoch = knownEpoch, shareFlags = shareFlags },
+        sync = { checksSeen = readChecksSeen(), items = readItems(), checks = readChecks(), epoch = knownEpoch, shareFlags = shareFlags },
         events = pendingEvents,
     })
 end
@@ -211,7 +251,7 @@ end
 -- (now-stale) response will be ignored by ShareLogic.isResponseFor, since its
 -- seq will no longer match the new outstandingSeq this function just set.
 local function checkForNewItems()
-    if shareMode ~= "checksSeen+shared" and shareMode ~= "checksSeen+items" then
+    if shareMode ~= "checksSeen+shared" and shareMode ~= "checksSeen+items" and shareMode ~= "checksSeen+items+checks" then
         return
     end
     local progressFrame = cpu2[addrLastProgressFrame]
@@ -233,12 +273,48 @@ local function checkForNewItems()
     previousItems = items
 end
 
+-- Structural copy of checkForNewItems, tracking real check completion
+-- instead of item pickups. Gated to checksSeen+items+checks only -- the
+-- other 3 modes never share checks. Reuses the same
+-- ShareLogic.shouldReportAcquired burst-suppression threshold as items
+-- (cInitBurstThreshold) unless live testing shows checks need their own.
+--
+-- Uses its OWN previousProgressFrameForChecks tracker, deliberately NOT
+-- shared with checkForNewItems()'s previousProgressFrame: both functions
+-- run back-to-back in the same main-loop cycle (see Step 7), and
+-- checkForNewItems() advances its own tracker to the current frame value
+-- before this function runs. If this function compared against that SAME
+-- now-updated variable, it would always see "no change" and never detect a
+-- new check -- sharing one variable between two independently-gated
+-- functions silently breaks whichever one runs second.
+local function checkForNewChecks()
+    if shareMode ~= "checksSeen+items+checks" then
+        return
+    end
+    local progressFrame = cpu2[addrLastProgressFrame]
+    if previousProgressFrameForChecks == progressFrame then
+        return
+    end
+    previousProgressFrameForChecks = progressFrame
+
+    local checksNow = readChecks()
+    if previousChecks then
+        local acquired = ShareLogic.diffNewBits(previousChecks, checksNow)
+        if ShareLogic.shouldReportAcquired(#acquired, cInitBurstThreshold) then
+            table.insert(pendingEvents, { game = currentTitle(), checks = acquired })
+            issueRequest()
+        end
+    end
+    previousChecks = checksNow
+end
+
 while true do
     itemCheckFrames = itemCheckFrames - 1
     if itemCheckFrames <= 0 then
         itemCheckFrames = cItemCheckFrames
         tryConsumeInbox()
         checkForNewItems()
+        checkForNewChecks()
         if outstandingSeq ~= nil then
             staleCycles = staleCycles + 1
             if staleCycles >= cStaleThreshold then
