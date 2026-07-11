@@ -6,8 +6,23 @@ const ROOM_STORAGE_KEY = "rmrSyncRoom";
 const WORKER_URL_STORAGE_KEY = "rmrSyncWorkerUrl";
 const MAX_LINES_STORAGE_KEY = "rmrSyncMaxLines";
 const SHOW_TEXT_STORAGE_KEY = "rmrSyncShowText";
+const SHOW_ITEMS_STORAGE_KEY = "rmrSyncShowItems";
+const SHOW_CHECKS_STORAGE_KEY = "rmrSyncShowChecks";
 const LANG_STORAGE_KEY = "rmrSyncLang";
 const SCALE_STORAGE_KEY = "rmrSyncScale";
+
+// Display-only -- the wire mode strings themselves are unchanged (see
+// worker/src/validation.js's VALID_MODES). A regular player has never read
+// boot.lua and has no reason to know what "checksSeen+shared" means.
+const MODE_LABELS = {
+  checksSeen: "Seen",
+  "checksSeen+shared": "Seen + Common Items",
+  "checksSeen+items": "Seen + All Items",
+  "checksSeen+items+checks": "Seen + All Items + Progress",
+};
+function friendlyModeLabel(mode) {
+  return mode ? (MODE_LABELS[mode] ?? mode) : "not created yet";
+}
 
 // Resolves a setting that can come from either a URL query param or the
 // settings panel (saved to localStorage). localStorage wins whenever it has
@@ -84,6 +99,23 @@ function getShowTextDefault() {
   return raw === "1" || raw === "true";
 }
 
+// Optional ?showItems=0 / ?showChecks=0 query param (or settings-panel
+// equivalent) to filter event-feed lines by kind. Unlike getShowTextDefault,
+// these default to true (shown) when nothing has ever been set -- an
+// explicit "0"/"false" (from unchecking the settings-panel box) is the only
+// way to turn a kind off, so a first-time visitor sees everything.
+function getShowItemsDefault() {
+  const raw = resolveStoredOrQuery(SHOW_ITEMS_STORAGE_KEY, "showItems");
+  if (raw === null) return true;
+  return raw === "1" || raw === "true";
+}
+
+function getShowChecksDefault() {
+  const raw = resolveStoredOrQuery(SHOW_CHECKS_STORAGE_KEY, "showChecks");
+  if (raw === null) return true;
+  return raw === "1" || raw === "true";
+}
+
 // Best-effort mapping from the browser's language preference to one of our
 // supported item-name languages. Only maps to zh-TW for Traditional-Chinese-
 // flavored tags (zh-TW/zh-Hant/zh-HK/zh-MO) -- plain "zh" or "zh-CN" is
@@ -132,6 +164,8 @@ function setupSettingsPanel() {
   const workerUrlInput = document.getElementById("settingsWorkerUrl");
   const maxLinesInput = document.getElementById("settingsMaxLines");
   const showTextInput = document.getElementById("settingsShowText");
+  const showItemsInput = document.getElementById("settingsShowItems");
+  const showChecksInput = document.getElementById("settingsShowChecks");
   const langInput = document.getElementById("settingsLang");
   const scaleInput = document.getElementById("settingsScale");
   const applyButton = document.getElementById("settingsApply");
@@ -141,6 +175,8 @@ function setupSettingsPanel() {
   maxLinesInput.value = resolveStoredOrQuery(MAX_LINES_STORAGE_KEY, "maxLines") ?? "";
   const storedShowText = resolveStoredOrQuery(SHOW_TEXT_STORAGE_KEY, "showText");
   showTextInput.checked = storedShowText === "1" || storedShowText === "true";
+  showItemsInput.checked = getShowItemsDefault();
+  showChecksInput.checked = getShowChecksDefault();
   // Prefill with the fully-resolved language (falling through to auto-detect)
   // rather than only the raw stored/query value, so the dropdown always shows
   // what's actually in effect right now, not blank when nothing's been chosen yet.
@@ -161,6 +197,8 @@ function setupSettingsPanel() {
     setStored(WORKER_URL_STORAGE_KEY, workerUrlInput.value.trim());
     setStored(MAX_LINES_STORAGE_KEY, maxLinesInput.value.trim());
     setStored(SHOW_TEXT_STORAGE_KEY, showTextInput.checked ? "1" : "0");
+    setStored(SHOW_ITEMS_STORAGE_KEY, showItemsInput.checked ? "1" : "0");
+    setStored(SHOW_CHECKS_STORAGE_KEY, showChecksInput.checked ? "1" : "0");
     setStored(LANG_STORAGE_KEY, langInput.value);
     setStored(SCALE_STORAGE_KEY, scaleInput.value.trim());
     window.location.reload();
@@ -173,15 +211,17 @@ function toWebSocketUrl(workerUrl, room) {
   return httpUrl.toString();
 }
 
-function renderEntry(event, showText, lang, shareFlags) {
+function renderEntry(event, showText, lang, shareFlags, showItems, showChecks) {
   // Some newly-set bits in the game's item-memory region don't correspond to a
   // real, named item (e.g. check/progress-tracking bits that happen to live in
   // the same memory range) -- ITEM_ID_MAP has no entry for those ids. Treat
   // them as "not really an item": don't show an icon/label for them, and don't
-  // render an entry line at all if every item in this event turns out to be one
-  // of these unnamed bits.
-  const realItems = event.items.filter((itemId) => ITEM_ID_MAP[itemId] !== undefined);
-  if (realItems.length === 0) {
+  // render an entry line at all if every item AND every check in this event
+  // turns out to be empty (either unnamed bits, or the kind was turned off via
+  // the showItems/showChecks settings-panel checkboxes).
+  const realItems = showItems ? event.items.filter((itemId) => ITEM_ID_MAP[itemId] !== undefined) : [];
+  const realChecks = showChecks ? (event.checks || []).filter((checkId) => CHECK_ID_MAP[checkId] !== undefined) : [];
+  if (realItems.length === 0 && realChecks.length === 0) {
     return null;
   }
 
@@ -228,6 +268,19 @@ function renderEntry(event, showText, lang, shareFlags) {
     entry.appendChild(item);
   }
 
+  // Checks have no icon/sprite -- just the raw short code (or an authored
+  // name, once tracker/check_names_en.js etc. have entries) as text.
+  for (const checkId of realChecks) {
+    const name = getCheckNameForId(checkId, lang);
+    const item = document.createElement("span");
+    item.className = "item check-item";
+    const text = document.createElement("span");
+    text.className = "item-label";
+    text.textContent = `[Check] ${name}`;
+    item.appendChild(text);
+    entry.appendChild(item);
+  }
+
   return entry;
 }
 
@@ -239,6 +292,8 @@ function main() {
   // Chromium browser (File System Access API, WebRTC keep-alive, etc.).
   log.style.zoom = getScalePercent() / 100;
   const showText = getShowTextDefault();
+  const showItems = getShowItemsDefault();
+  const showChecks = getShowChecksDefault();
   const lang = resolveLanguage();
   const maxLines = getMaxLines();
   let allEvents = [];
@@ -276,7 +331,7 @@ function main() {
     log.innerHTML = "";
     const rendered = [];
     for (const event of allEvents) {
-      const el = renderEntry(event, showText, lang, shareFlags);
+      const el = renderEntry(event, showText, lang, shareFlags, showItems, showChecks);
       if (el) {
         rendered.push(el);
       }
@@ -324,10 +379,10 @@ function main() {
         allEvents = data.backlog.slice();
         shareFlags = data.shareFlags || {};
         renderAll();
-        appendStatusLine(`connected to room ${room} (mode: ${data.mode ?? "not created yet"})`);
+        appendStatusLine(`connected to room ${room} (mode: ${friendlyModeLabel(data.mode)})`);
       } else if (data.type === "event") {
         allEvents.push(data.event);
-        const el = renderEntry(data.event, showText, lang, shareFlags);
+        const el = renderEntry(data.event, showText, lang, shareFlags, showItems, showChecks);
         if (el) {
           appendToLog(el);
         }
