@@ -226,4 +226,12 @@ describe("RoomDO /event -- item merging (checksSeen+item+all mode)", () => {
     expect(mergedItems[36] & 0x10).toBe(0x10); // id 292: byte 36, bit 4
     expect(mergedItems[68] & 0x10).toBe(0x10); // id 548: byte 68, bit 4
   });
+
+  it("reflects merged item bits in admin/status's mergedItemsBitsSet", async () => {
+    const stub = getStub("test-room-merge-all-3");
+    await initRoom(stub, "checksSeen+item+all");
+    await postEvent(stub, { player: "a", game: 1, items: [36] }); // sets 3 sibling bits
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.mergedItemsBitsSet).toBe(3);
+  });
 });

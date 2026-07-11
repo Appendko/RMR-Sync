@@ -82,10 +82,12 @@ export class RoomDO {
   async handleStatus() {
     const mode = (await this.state.storage.get("mode")) ?? null;
     const checksSeen = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
+    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
     const events = (await this.state.storage.get("events")) ?? [];
     return jsonResponse({
       mode,
       checksSeenBitsSet: countSetBits(checksSeen),
+      mergedItemsBitsSet: countSetBits(mergedItems),
       eventCount: events.length,
       connected: this.sockets.size,
     });

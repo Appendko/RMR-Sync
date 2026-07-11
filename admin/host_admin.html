@@ -117,9 +117,13 @@ async function refreshStatus() {
     if (data.mode) {
       document.getElementById("mode").value = data.mode;
     }
+    const itemsLine = (data.mode === "checksSeen+item" || data.mode === "checksSeen+item+all")
+      ? `merged item bits set: ${data.mergedItemsBitsSet}\n`
+      : "";
     showStatus(
       `mode: ${data.mode ?? "(not created yet)"}\n` +
       `checksSeen bits set: ${data.checksSeenBitsSet}\n` +
+      itemsLine +
       `event count: ${data.eventCount}\n` +
       `connected trackers: ${data.connected}`,
       false
