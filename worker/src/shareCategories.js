@@ -15,10 +15,3 @@ export function shareCategoryForId(id) {
   if (altItemNo >= 0x60 && altItemNo <= 0x73) return "upgradeItem";
   return null;
 }
-
-// The three sibling ids representing "the same slot" across all 3 titles --
-// each title's own item block is exactly 256 ids wide.
-export function itemMergeSiblings(id) {
-  const slot = id % 256;
-  return [slot, slot + 256, slot + 512];
-}

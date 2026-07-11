@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shareCategoryForId, itemMergeSiblings } from "../src/shareCategories.js";
+import { shareCategoryForId } from "../src/shareCategories.js";
 
 describe("shareCategoryForId", () => {
   it("classifies lifeUp (0x00-0x0F)", () => {
@@ -50,13 +50,5 @@ describe("shareCategoryForId", () => {
 
   it("returns null for the ItEmpty sentinel", () => {
     expect(shareCategoryForId(255)).toBeNull();
-  });
-});
-
-describe("itemMergeSiblings", () => {
-  it("returns the same 3 ids regardless of which title's id you start from", () => {
-    expect(itemMergeSiblings(36)).toEqual([36, 292, 548]); // Sub Tank #1, starting from title 1
-    expect(itemMergeSiblings(292)).toEqual([36, 292, 548]); // same slot, starting from title 2
-    expect(itemMergeSiblings(548)).toEqual([36, 292, 548]); // same slot, starting from title 3
   });
 });
