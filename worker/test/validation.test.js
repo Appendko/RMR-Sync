@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidItemsArray, isValidChecksArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
 
 describe("isValidMode", () => {
-  it("accepts the three known modes", () => {
+  it("accepts the four known modes", () => {
     expect(isValidMode("checksSeen")).toBe(true);
     expect(isValidMode("checksSeen+shared")).toBe(true);
     expect(isValidMode("checksSeen+items")).toBe(true);
+    expect(isValidMode("checksSeen+items+checks")).toBe(true);
   });
 
   it("rejects anything else", () => {
@@ -66,11 +67,48 @@ describe("isValidItemsArray", () => {
   });
 });
 
+describe("isValidChecksArray", () => {
+  it("accepts a 96-length array of byte values", () => {
+    expect(isValidChecksArray(new Array(96).fill(0))).toBe(true);
+  });
+
+  it("rejects wrong length", () => {
+    expect(isValidChecksArray(new Array(95).fill(0))).toBe(false);
+  });
+
+  it("rejects out-of-range or non-integer values", () => {
+    const bad1 = new Array(96).fill(0);
+    bad1[0] = 256;
+    expect(isValidChecksArray(bad1)).toBe(false);
+
+    const bad2 = new Array(96).fill(0);
+    bad2[0] = 1.5;
+    expect(isValidChecksArray(bad2)).toBe(false);
+  });
+
+  it("rejects non-arrays", () => {
+    expect(isValidChecksArray("not an array")).toBe(false);
+    expect(isValidChecksArray(null)).toBe(false);
+  });
+});
+
 describe("validateEventBody", () => {
   const valid = { player: "ds83171", game: 2, items: [0] };
 
-  it("accepts a well-formed body", () => {
+  it("accepts a well-formed body with only items", () => {
     expect(validateEventBody(valid)).toBeNull();
+  });
+
+  it("accepts a well-formed body with only checks", () => {
+    expect(validateEventBody({ player: "ds83171", game: 2, checks: [0] })).toBeNull();
+  });
+
+  it("accepts a well-formed body with both items and checks", () => {
+    expect(validateEventBody({ player: "ds83171", game: 2, items: [0], checks: [1] })).toBeNull();
+  });
+
+  it("rejects a body with neither items nor checks", () => {
+    expect(validateEventBody({ player: "ds83171", game: 2 })).toMatch(/items or checks/);
   });
 
   it("rejects a missing or empty player name", () => {
@@ -94,10 +132,20 @@ describe("validateEventBody", () => {
   });
 
   it("rejects non-integer or out-of-range item entries", () => {
-    expect(validateEventBody({ ...valid, items: ["not-a-number"] })).toMatch(/item/);
-    expect(validateEventBody({ ...valid, items: [-1] })).toMatch(/item/);
-    expect(validateEventBody({ ...valid, items: [768] })).toMatch(/item/);
-    expect(validateEventBody({ ...valid, items: [1.5] })).toMatch(/item/);
+    expect(validateEventBody({ ...valid, items: ["not-a-number"] })).toMatch(/items/);
+    expect(validateEventBody({ ...valid, items: [-1] })).toMatch(/items/);
+    expect(validateEventBody({ ...valid, items: [768] })).toMatch(/items/);
+    expect(validateEventBody({ ...valid, items: [1.5] })).toMatch(/items/);
+  });
+
+  it("rejects an empty or oversized checks array", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [] })).toMatch(/checks/);
+    expect(validateEventBody({ player: "a", game: 1, checks: new Array(21).fill(0) })).toMatch(/checks/);
+  });
+
+  it("rejects non-integer or out-of-range check entries", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [-1] })).toMatch(/checks/);
+    expect(validateEventBody({ player: "a", game: 1, checks: [768] })).toMatch(/checks/);
   });
 
   it("rejects a non-object body", () => {
