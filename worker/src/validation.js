@@ -74,6 +74,10 @@ export function isValidEpoch(value) {
   return Number.isInteger(value) && value >= 0;
 }
 
+// Optional field on the /sync body -- which item categories this seed's own
+// generated settings configured as shared across all 3 games (read from ROM by
+// lua/share_info.lua, static for the whole session). Older Lua clients that
+// predate this field simply omit it, so `undefined` is valid too.
 export function isValidShareFlags(value) {
   if (value === undefined) return true;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
