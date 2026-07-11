@@ -269,3 +269,100 @@ non-whitelisted item (e.g. a boss weapon) in one instance under
 `checksSeen+item+all` and confirm what actually happens in the other
 instance's game — this is the open experimental question, not an assumed-safe
 mechanism.
+
+## Addendum (2026-07-11): `itemMergeSiblings` deleted — replaced with a full-array, same-title, cross-player OR-merge
+
+The `checksSeen+item+all` experiment above answered its own question: BizHawk
+testing confirmed `itemMergeSiblings`'s "same numeric slot across all 3
+titles" projection **does** corrupt state for non-whitelisted items. Picking
+up one boss weapon in one title silently granted an unrelated key/weapon in
+another title, because "same slot number" only actually means "the same
+conceptual item" for the 7 whitelisted categories (`lifeUp`, `energyUp`,
+`subTank`, `sigmaKey`, `finalWeapon`, `armor`, `upgradeItem`) — not for boss
+weapons, keys, or any other stage-varied item, whose slot layout differs
+per title. This wasn't a hypothetical: it was the exact failure mode this
+spec's `checksSeen+item+all` addendum set out to test, and the test found it.
+`itemMergeSiblings` has accordingly been deleted from
+`worker/src/shareCategories.js` — there is no more cross-title sibling-id
+projection anywhere in the system, in any mode.
+
+**Replacement mechanism**: each Lua client now sends its own full 96-byte
+`items` snapshot (`readItems()`, reading `addrItems` directly) on every
+`/sync` call, alongside `checksSeen` — see `lua/share_info.lua`'s
+`issueRequest()`, whose outgoing `sync` payload is now
+`{ checksSeen = readChecksSeen(), items = readItems(), epoch = knownEpoch, shareFlags = shareFlags }`.
+The Worker's `handleSync` (`worker/src/room.js`) OR-merges this into a
+room-level `mergedItems` via a new `mergeIncomingItems(stored, incoming,
+mode, shareFlags)` helper. This is a **same-title, cross-PLAYER** merge —
+byte position `i` of one client's `items` array only ever OR-merges into byte
+position `i` of the room's stored `mergedItems`; no bit is ever read from one
+byte position and written to another, so there is no path left for a bit to
+cross from one title's byte range into a different title's byte range. The
+three-tier mode behavior is now entirely inside this one helper:
+- `checksSeen` (items sharing disabled): `mergeIncomingItems` returns `stored`
+  unchanged — the `items` field is still validated on every request, just
+  never folded into `mergedItems`.
+- `checksSeen+item`: bit-granular filtering, not byte-granular — for every
+  id `0..767`, if that id's bit is set in the incoming snapshot and
+  `shareCategoryForId(id)` (unchanged, still `worker/src/shareCategories.js`)
+  returns a category that is `true` in the room's stored `shareFlags`, the
+  bit is folded into `mergedItems` via the existing `setBit` helper
+  (`worker/src/bits.js`). The code comments why this can't be byte-granular:
+  `subTank`'s range (`0x24`-`0x27`) doesn't start on a byte boundary, so the
+  byte holding subTank ids 36-39 also holds unrelated, unwhitelisted ids
+  32-35 — merging the whole byte would incorrectly pull those in too.
+- `checksSeen+item+all`: no filter at all — the entire incoming array
+  OR-merges unconditionally via the existing `orMergeBytes` helper
+  (`worker/src/bits.js`).
+
+**`items` is now a required, epoch-gated `/sync` field.** `isValidItemsArray`
+(new, `worker/src/validation.js`) validates it with the same 96-byte,
+0-255-per-entry shape check `isValidChecksSeenArray` already used (both now
+share a common `isValidByteArray(arr, length)` helper). `handleSync` rejects
+the request with 400 if `items` is missing or malformed, exactly like
+`checksSeen`. More importantly, a client reporting a stale (pre-reset) epoch
+now has its contribution to *both* `checksSeen` and `mergedItems` discarded
+by the same `body.epoch >= currentEpoch` gate — previously `mergedItems` had
+**no** epoch protection at all, because it was populated purely server-side
+from `/event` (which carried no epoch field). Since `items` is now
+client-supplied on every `/sync`, it needed the same protection `checksSeen`
+already had, and now gets it via the identical check.
+
+**`handleEvent` no longer computes any merge.** Previously `handleEvent` was
+responsible for OR-ing `itemMergeSiblings(id)` into `mergedItems` for
+newly-accepted item ids; that entire block is gone. `handleEvent` now does
+exactly one thing: duplicate-filtering (unchanged
+`recentlyPostedItems`/`DUPLICATE_EVENT_WINDOW_MS` logic) and appending to/
+broadcasting the `events` feed for the tracker's event-feed display. It is
+fully decoupled from merging — merging now happens exclusively in
+`handleSync`. The mode gate on `/event` (`mode !== "checksSeen+item" &&
+mode !== "checksSeen+item+all"` → 403) is unchanged, since the event feed
+display is still tier-gated the same way it always was.
+
+**`worker/src/room.js`'s `handleInit`/`handleReset`** still initialize/reset
+`mergedItems` to `new Array(96).fill(0)`, and `/admin/reset` still bumps
+`resetEpoch` — unchanged from the original design, since `mergedItems`'s
+shape and reset behavior didn't need to change, only how it gets populated.
+
+**`lua/share_info.lua`'s `tryConsumeInbox`** is unchanged in structure:
+`writeMergedItems(msg.sync.mergedItems, forceOverwrite)` still writes into
+both `cpu[addrItems+i]` (immediate effect) and `sessionSave.items[i]`
+(durable persistence, so a later unrelated title switch doesn't lose the
+merge when `boot.lua` restores `addrItems` from `sessionSave.items`). What
+changed is only what feeds it: `mergedItems` in the `/sync` response is now
+computed by `handleSync`/`mergeIncomingItems` instead of accumulated by
+`handleEvent`.
+
+**Accepted tradeoff, explicitly weighed against the corruption above**: a
+player who exclusively plays one title no longer automatically receives an
+item that was only ever found in a title they've never touched, because
+there is no more cross-title projection of any kind — a title's bits only
+ever come from other players' own snapshots of *that same title's* byte
+range. This is a deliberate, informed decision, not a bug: it was weighed
+against `itemMergeSiblings`'s confirmed failure mode (silently granting
+unrelated items across titles) and judged the correct tradeoff, since the
+old mechanism's cross-title convenience was exactly what caused the
+corruption in the first place. A future spec could reintroduce
+same-conceptual-item sharing across titles for the 7 whitelisted categories
+specifically (where "same slot" genuinely does mean "same item"), but that
+is out of scope here.
