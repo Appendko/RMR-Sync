@@ -54,6 +54,42 @@ function friendlyModeLabel(mode) {
   return mode ? (MODE_LABELS[mode] ?? mode) : "(not created yet)";
 }
 
+// Remembers the last-used Worker URL, room key, and mode across visits --
+// everything except the admin secret, which is deliberately never persisted
+// (it's a password; leaving it out of localStorage means it's never sitting
+// around in plaintext, at the cost of re-typing it each visit).
+const WORKER_URL_STORAGE_KEY = "rmrAdminWorkerUrl";
+const ROOM_KEY_STORAGE_KEY = "rmrAdminRoomKey";
+const MODE_STORAGE_KEY = "rmrAdminMode";
+
+function restoreSettings() {
+  try {
+    const workerUrl = localStorage.getItem(WORKER_URL_STORAGE_KEY);
+    const roomKey = localStorage.getItem(ROOM_KEY_STORAGE_KEY);
+    const mode = localStorage.getItem(MODE_STORAGE_KEY);
+    if (workerUrl) document.getElementById("workerUrl").value = workerUrl;
+    if (roomKey) document.getElementById("roomKey").value = roomKey;
+    if (mode) document.getElementById("mode").value = mode;
+  } catch {
+    // localStorage unavailable (e.g. private browsing) -- just start blank.
+  }
+}
+
+function persistSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not fatal -- this session just won't be remembered next time.
+  }
+}
+
+function setupSettingsPersistence() {
+  restoreSettings();
+  document.getElementById("workerUrl").addEventListener("input", (e) => persistSetting(WORKER_URL_STORAGE_KEY, e.target.value));
+  document.getElementById("roomKey").addEventListener("input", (e) => persistSetting(ROOM_KEY_STORAGE_KEY, e.target.value));
+  document.getElementById("mode").addEventListener("change", (e) => persistSetting(MODE_STORAGE_KEY, e.target.value));
+}
+
 function getBaseUrl() {
   return document.getElementById("workerUrl").value.trim().replace(/\/$/, "");
 }
@@ -129,6 +165,10 @@ async function refreshStatus() {
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     if (data.mode) {
       document.getElementById("mode").value = data.mode;
+      // Setting .value programmatically doesn't fire a "change" event, so
+      // the input listener in setupSettingsPersistence won't catch this --
+      // persist it explicitly, so a refreshed mode is remembered too.
+      persistSetting(MODE_STORAGE_KEY, data.mode);
     }
     const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items")
       ? `merged item bits set: ${data.mergedItemsBitsSet}\n`
@@ -150,6 +190,8 @@ document.getElementById("createBtn").addEventListener("click", createRoom);
 document.getElementById("resetBtn").addEventListener("click", resetRoom);
 document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
 document.getElementById("deleteBtn").addEventListener("click", deleteRoom);
+
+setupSettingsPersistence();
 </script>
 </body>
 </html>
