@@ -1,4 +1,5 @@
-package.path = package.path..";lua\\?.lua"
+-- Run from the lua/ folder (cwd = lua/): lua test/share_logic_test.lua
+package.path = package.path..";lib\\?.lua"
 require "share_logic"
 
 local function assertEqual(actual, expected, label)
@@ -35,6 +36,33 @@ assertEqual(ShareLogic.shouldReportAcquired(1, 6), true, "shouldReportAcquired s
 assertEqual(ShareLogic.shouldReportAcquired(5, 6), true, "shouldReportAcquired just under threshold")
 assertEqual(ShareLogic.shouldReportAcquired(6, 6), false, "shouldReportAcquired at threshold")
 assertEqual(ShareLogic.shouldReportAcquired(8, 6), false, "shouldReportAcquired well over threshold")
+
+-- isGameCleared: >= 0x80 means the title's story is complete, matching
+-- boot.lua's own cMS_queryClearStatus threshold
+assertEqual(ShareLogic.isGameCleared(0x80), true, "isGameCleared at threshold")
+assertEqual(ShareLogic.isGameCleared(0xFF), true, "isGameCleared well above threshold")
+assertEqual(ShareLogic.isGameCleared(0x7F), false, "isGameCleared just below threshold")
+assertEqual(ShareLogic.isGameCleared(0), false, "isGameCleared untouched title")
+
+-- formatClearTime: matches boot.lua's own getHMMSS (flat 60 frames/sec)
+assertEqual(ShareLogic.formatClearTime(0), "0:00:00", "formatClearTime zero")
+assertEqual(ShareLogic.formatClearTime(59), "0:00:00", "formatClearTime under a second rounds down")
+assertEqual(ShareLogic.formatClearTime(60), "0:00:01", "formatClearTime exactly one second")
+assertEqual(ShareLogic.formatClearTime(3600), "0:01:00", "formatClearTime exactly one minute")
+assertEqual(ShareLogic.formatClearTime(216000), "1:00:00", "formatClearTime exactly one hour")
+assertEqual(ShareLogic.formatClearTime(302160), "1:23:56", "formatClearTime H:MM:SS composite (1h23m56s * 60 frames/sec)")
+
+-- isEventCheckId: stage-clear and boss-defeat ids are events, plain pickup
+-- locations are not
+assertEqual(ShareLogic.isEventCheckId(240), true, "isEventCheckId X1 opening stage clear")
+assertEqual(ShareLogic.isEventCheckId(251), true, "isEventCheckId X1 sigma stage 3 clear")
+assertEqual(ShareLogic.isEventCheckId(493), true, "isEventCheckId Violen defeated")
+assertEqual(ShareLogic.isEventCheckId(751), true, "isEventCheckId Byte defeated")
+assertEqual(ShareLogic.isEventCheckId(766), true, "isEventCheckId X3 sigma stage 2 clear (2)")
+assertEqual(ShareLogic.isEventCheckId(0), false, "isEventCheckId life capsule is not an event")
+assertEqual(ShareLogic.isEventCheckId(53), false, "isEventCheckId Hadouken is not an event")
+assertEqual(ShareLogic.isEventCheckId(610), false, "isEventCheckId Ride Armor pickup is not an event")
+assertEqual(ShareLogic.isEventCheckId(492), false, "isEventCheckId id just before X-Hunters block")
 
 -- extractSeedKey: pulls the capital-S Base64 seed segment out of the Option
 -- string, surviving boot.lua's own truncation of the tail since the seed

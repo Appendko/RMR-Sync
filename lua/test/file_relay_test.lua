@@ -1,4 +1,5 @@
-package.path = package.path..";lua\\?.lua"
+-- Run from the lua/ folder (cwd = lua/): lua test/file_relay_test.lua
+package.path = package.path..";lib\\?.lua"
 require "json"
 require "file_relay"
 
@@ -8,8 +9,13 @@ local function assertEqual(actual, expected, label)
     end
 end
 
+-- "." as gameDir keeps these test artifacts in the current directory (the
+-- lua/ folder, per this file's own run convention above) -- exercises the
+-- same gameDir-relative path-building real callers use, just pointed at cwd.
+local GAME_DIR = "."
+
 -- writeOutbox produces a file readInbox-compatible JSON can decode back
-local ok, err = Relay.writeOutbox({ session = "abc123", seq = 1, sync = { checksSeen = {0, 1, 2}, epoch = 0 } })
+local ok, err = Relay.writeOutbox({ session = "abc123", seq = 1, sync = { checksSeen = {0, 1, 2}, epoch = 0 } }, GAME_DIR)
 assertEqual(ok, true, "writeOutbox ok")
 assertEqual(err, nil, "writeOutbox err")
 
@@ -25,13 +31,13 @@ os.remove("rmrsync_out.json")
 
 -- readInbox: missing file -> nil, not an error
 os.remove("rmrsync_in.json")
-assertEqual(Relay.readInbox(), nil, "readInbox missing file")
+assertEqual(Relay.readInbox(GAME_DIR), nil, "readInbox missing file")
 
 -- readInbox: valid file -> decoded table
 local fh2 = io.open("rmrsync_in.json", "w")
 fh2:write('{"session":"abc123","seq":1,"ok":true,"sync":{"mode":"checksSeen","checksSeen":[1,1,0],"epoch":0},"eventsPosted":0,"error":null}')
 fh2:close()
-local inbox = Relay.readInbox()
+local inbox = Relay.readInbox(GAME_DIR)
 assertEqual(inbox.session, "abc123", "readInbox session")
 assertEqual(inbox.ok, true, "readInbox ok")
 assertEqual(inbox.sync.mode, "checksSeen", "readInbox sync.mode")
@@ -41,13 +47,13 @@ assertEqual(inbox.sync.checksSeen[1], 1, "readInbox sync.checksSeen[1]")
 local fh3 = io.open("rmrsync_in.json", "w")
 fh3:write("")
 fh3:close()
-assertEqual(Relay.readInbox(), nil, "readInbox empty file")
+assertEqual(Relay.readInbox(GAME_DIR), nil, "readInbox empty file")
 
 -- readInbox: torn/garbage file -> nil, not a crash
 local fh4 = io.open("rmrsync_in.json", "w")
 fh4:write('{"session":"abc123","seq":1,"ok":tr')  -- truncated mid-value
 fh4:close()
-assertEqual(Relay.readInbox(), nil, "readInbox torn file")
+assertEqual(Relay.readInbox(GAME_DIR), nil, "readInbox torn file")
 
 os.remove("rmrsync_in.json")
 print("ALL PASS")
