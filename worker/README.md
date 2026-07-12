@@ -56,7 +56,7 @@ For **10 players playing for 4 hours**:
 
 That's about 14% of the daily cap, leaving plenty of headroom for a longer
 session, more players, or several separate rooms sharing the same Worker
-deployment on the same day. The browser relay page (`tracker/sync_relay.html`)
+deployment on the same day. The browser relay page (`pages/tracker/sync_relay.html`)
 polls its local outbox file every 400ms, but that's a **local file read**,
 not a network request — it only actually calls the Worker when it sees a
 genuinely new request to relay, which is what keeps the real request count
@@ -162,8 +162,9 @@ Notes:
 ## Point the mod at this backend
 
 Once deployed, put the printed URL into `worker_url` in
-`config/share_config.txt` (for players) and into the admin page's
-Worker URL field.
+`share_config.txt` (for players -- copied from `lua/share_config.example.txt`
+to sit next to `boot.lua`, see the main `README.md`) and into the admin
+page's Worker URL field.
 
 ## Note on new subdomains
 

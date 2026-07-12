@@ -44,11 +44,19 @@ describe("RoomDO /event", () => {
     expect(res.status).toBe(409);
   });
 
-  it("rejects events when the room's mode is checksSeen only", async () => {
+  it("rejects an items event when the room's mode is checksSeen only", async () => {
     const stub = getStub("test-room-event-2");
     await initRoom(stub, "checksSeen");
     const res = await postEvent(stub, { player: "a", game: 1, items: [0] });
     expect(res.status).toBe(403);
+  });
+
+  it("accepts a checks-only event even when the room's mode is checksSeen only", async () => {
+    const stub = getStub("test-room-event-2b");
+    await initRoom(stub, "checksSeen");
+    const res = await postEvent(stub, { player: "a", game: 1, checks: [0] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
   });
 
   it("accepts and stores events when mode includes items", async () => {
@@ -149,26 +157,34 @@ describe("RoomDO /event", () => {
     expect(statusAfterSecond.eventCount).toBe(1);
   });
 
-  it("accepts and stores events when mode is checksSeen+items+checks", async () => {
-    const stub = getStub("test-room-event-3c");
-    await initRoom(stub, "checksSeen+items+checks");
-    const res = await postEvent(stub, { player: "a", game: 1, checks: [0] });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-
-    const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status.eventCount).toBe(1);
-  });
-
   it("accepts an event with both items and checks", async () => {
     const stub = getStub("test-room-event-3d");
-    await initRoom(stub, "checksSeen+items+checks");
+    await initRoom(stub, "checksSeen+items");
     const res = await postEvent(stub, { player: "a", game: 1, items: [0], checks: [0] });
     expect(res.status).toBe(200);
 
     const backlog = await getBacklog(stub);
     expect(backlog[0].items).toEqual([0]);
     expect(backlog[0].checks).toEqual([0]);
+  });
+
+  it("passes gameClearTime through on the all-clear check id (903), even in plain checksSeen mode", async () => {
+    const stub = getStub("test-room-event-allclear-1");
+    await initRoom(stub, "checksSeen");
+    const res = await postEvent(stub, { player: "a", game: 1, checks: [903], gameClearTime: "1:23:56" });
+    expect(res.status).toBe(200);
+
+    const backlog = await getBacklog(stub);
+    expect(backlog[0].checks).toEqual([903]);
+    expect(backlog[0].gameClearTime).toBe("1:23:56");
+  });
+
+  it("does not attach gameClearTime to a normal check event that doesn't send one", async () => {
+    const stub = getStub("test-room-event-allclear-2");
+    await initRoom(stub, "checksSeen");
+    await postEvent(stub, { player: "a", game: 1, checks: [243] });
+    const backlog = await getBacklog(stub);
+    expect(backlog[0].gameClearTime).toBeUndefined();
   });
 });
 
@@ -180,7 +196,7 @@ function sync(stub, epoch = 0) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch }),
+    body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch }),
   });
 }
 
@@ -191,7 +207,7 @@ describe("RoomDO /event -- no longer merges items (moved to /sync)", () => {
     await stub.fetch("https://do/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch: 0, shareFlags: { subTank: true } }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0, shareFlags: { subTank: true } }),
     });
     await postEvent(stub, { player: "a", game: 1, items: [36] }); // 1ItSubtank1
     const { mergedItems } = await (await sync(stub)).json();
@@ -210,7 +226,7 @@ describe("RoomDO /event -- no longer merges items (moved to /sync)", () => {
 describe("RoomDO /event -- duplicate-window keys namespaced by kind", () => {
   it("does not treat an item id and a check id with the same number as duplicates of each other", async () => {
     const stub = getStub("test-room-event-namespace-1");
-    await initRoom(stub, "checksSeen+items+checks");
+    await initRoom(stub, "checksSeen+items");
     await postEvent(stub, { player: "a", game: 1, items: [5] });
     const res = await postEvent(stub, { player: "a", game: 1, checks: [5] });
     expect(res.status).toBe(200);
@@ -221,7 +237,7 @@ describe("RoomDO /event -- duplicate-window keys namespaced by kind", () => {
 
   it("still dedupes an immediate exact-duplicate check the same way items already are", async () => {
     const stub = getStub("test-room-event-namespace-2");
-    await initRoom(stub, "checksSeen+items+checks");
+    await initRoom(stub, "checksSeen+items");
     await postEvent(stub, { player: "a", game: 1, checks: [9] });
     const res = await postEvent(stub, { player: "a", game: 1, checks: [9] });
     expect(res.status).toBe(200);

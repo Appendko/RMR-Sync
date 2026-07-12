@@ -1,5 +1,5 @@
 // Mirrors ref/aaa/boot.lua's own altItemNo range boundaries (the same ones
-// tracker/icon_map.js's shareCategoryFor uses, re-derived here from the
+// pages/tracker/icon_map.js's shareCategoryFor uses, re-derived here from the
 // numeric id directly since the Worker has no access to the browser-only
 // ITEM_ID_MAP string codes). Boss weapons/keys, stage-varied, Vava-family,
 // Ride Armor, Zero parts, and the ungated recovery-item codes are

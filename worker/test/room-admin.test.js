@@ -44,7 +44,7 @@ describe("RoomDO admin lifecycle", () => {
   it("reports status for an uninitialized room", async () => {
     const stub = getStub("test-room-status-1");
     const res = await stub.fetch("https://do/admin/status");
-    expect(await res.json()).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, checksBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(await res.json()).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
   it("never exposes the admin secret via status", async () => {
@@ -66,7 +66,7 @@ describe("RoomDO admin lifecycle", () => {
     const res = await postJson(stub, "/admin/reset", { adminSecret: "s3cr3t" });
     expect(await res.json()).toEqual({ ok: true, mode: "checksSeen+shared" });
     const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status).toEqual({ mode: "checksSeen+shared", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, checksBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(status).toEqual({ mode: "checksSeen+shared", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
   it("rejects reset with a missing or wrong admin secret", async () => {
@@ -102,7 +102,7 @@ describe("RoomDO admin lifecycle", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "invalid mode" });
     const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status).toEqual({ mode: "checksSeen", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, checksBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(status).toEqual({ mode: "checksSeen", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
   it("rejects reset with the wrong admin secret even if a valid mode is provided", async () => {
@@ -122,7 +122,7 @@ describe("RoomDO admin lifecycle", () => {
     expect(await res.json()).toEqual({ deleted: true });
 
     const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, checksBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(status).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
 
     const initRes = await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "new-secret" });
     expect(await initRes.json()).toEqual({ mode: "checksSeen", created: true });
@@ -162,6 +162,6 @@ describe("RoomDO auto-expiry", () => {
     expect(ran).toBe(true);
 
     const after = await stub.fetch("https://do/admin/status");
-    expect(await after.json()).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, checksBitsSet: 0, eventCount: 0, connected: 0 });
+    expect(await after.json()).toEqual({ mode: null, checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 });

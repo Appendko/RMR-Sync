@@ -1,10 +1,9 @@
 import { orMergeBytes, countSetBits, setBit } from "./bits.js";
-import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidItemsArray, isValidChecksArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidItemsArray, isValidEpoch, isValidShareFlags, validateEventBody } from "./validation.js";
 import { shareCategoryForId } from "./shareCategories.js";
 
 const CHECKS_SEEN_LENGTH = 96;
 const ITEMS_LENGTH = 96;
-const CHECKS_LENGTH = 96;
 const MAX_EVENTS = 200;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
 const DUPLICATE_EVENT_WINDOW_MS = 15000;
@@ -24,7 +23,7 @@ function jsonResponse(data, status = 200) {
 // "same slot number != same item across titles" risk for any item, in any
 // mode.
 function mergeIncomingItems(stored, incoming, mode, shareFlags) {
-  if (mode === "checksSeen+items" || mode === "checksSeen+items+checks") {
+  if (mode === "checksSeen+items") {
     // No category filter at all -- the entire array OR-merges unconditionally.
     return orMergeBytes(stored, incoming);
   }
@@ -112,7 +111,6 @@ export class RoomDO {
     await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
-    await this.state.storage.put("checks", new Array(CHECKS_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -123,13 +121,11 @@ export class RoomDO {
     const mode = (await this.state.storage.get("mode")) ?? null;
     const checksSeen = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
     const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
-    const checks = (await this.state.storage.get("checks")) ?? new Array(CHECKS_LENGTH).fill(0);
     const events = (await this.state.storage.get("events")) ?? [];
     return jsonResponse({
       mode,
       checksSeenBitsSet: countSetBits(checksSeen),
       mergedItemsBitsSet: countSetBits(mergedItems),
-      checksBitsSet: countSetBits(checks),
       eventCount: events.length,
       connected: this.sockets.size,
     });
@@ -154,7 +150,6 @@ export class RoomDO {
     await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
-    await this.state.storage.put("checks", new Array(CHECKS_LENGTH).fill(0));
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -189,16 +184,14 @@ export class RoomDO {
       !body ||
       !isValidChecksSeenArray(body.checksSeen) ||
       !isValidItemsArray(body.items) ||
-      !isValidChecksArray(body.checks) ||
       !isValidEpoch(body.epoch) ||
       !isValidShareFlags(body.shareFlags)
     ) {
-      return jsonResponse({ error: "invalid checksSeen, items, checks, epoch, or shareFlags" }, 400);
+      return jsonResponse({ error: "invalid checksSeen, items, epoch, or shareFlags" }, 400);
     }
     const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
     const storedChecksSeen = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
     const storedMergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
-    const storedChecks = (await this.state.storage.get("checks")) ?? new Array(CHECKS_LENGTH).fill(0);
 
     // Static per-seed data (read once from ROM by lua/share_info.lua, not derived
     // from player progress) -- just store whatever's sent, no merge logic needed.
@@ -209,25 +202,17 @@ export class RoomDO {
 
     let checksSeen = storedChecksSeen;
     let mergedItems = storedMergedItems;
-    let checks = storedChecks;
     // A client reporting a stale (pre-reset) epoch has its contribution to
-    // ALL THREE arrays discarded -- same protection checksSeen/items already had.
+    // BOTH arrays discarded -- same protection checksSeen/items already had.
     if (body.epoch >= currentEpoch) {
       checksSeen = orMergeBytes(storedChecksSeen, body.checksSeen);
       await this.state.storage.put("checksSeen", checksSeen);
       mergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
       await this.state.storage.put("mergedItems", mergedItems);
-      // checks (real progress) merges unconditionally, same as items does in
-      // checksSeen+items -- checks aren't item-categorized at all, so there's
-      // no equivalent of a shareFlags gate for them.
-      if (mode === "checksSeen+items+checks") {
-        checks = orMergeBytes(storedChecks, body.checks);
-        await this.state.storage.put("checks", checks);
-      }
     }
 
     await this.scheduleExpiry();
-    return jsonResponse({ mode, checksSeen, epoch: currentEpoch, shareFlags, mergedItems, checks });
+    return jsonResponse({ mode, checksSeen, epoch: currentEpoch, shareFlags, mergedItems });
   }
 
   async handleEvent(request) {
@@ -235,13 +220,19 @@ export class RoomDO {
     if (!mode) {
       return jsonResponse({ error: "room not initialized" }, 409);
     }
-    if (mode !== "checksSeen+shared" && mode !== "checksSeen+items" && mode !== "checksSeen+items+checks") {
-      return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
-    }
     const body = await request.json().catch(() => null);
     const validationError = validateEventBody(body);
     if (validationError) {
       return jsonResponse({ error: validationError }, 400);
+    }
+    // Item-pickup events are only meaningful in a room that's actually
+    // sharing items -- reported the same way mergeIncomingItems silently
+    // no-ops items in plain "checksSeen" mode. Check-completion events
+    // (stage clear / boss defeat) are announcements about a player's own
+    // local progress, unrelated to which item categories this room shares,
+    // so they're allowed in all 3 modes.
+    if (body.items !== undefined && mode !== "checksSeen+shared" && mode !== "checksSeen+items") {
+      return jsonResponse({ error: "items sharing not enabled for this room" }, 403);
     }
     const now = Date.now();
     // Prune stale entries so this map doesn't grow unbounded over a long session.
@@ -281,6 +272,12 @@ export class RoomDO {
     }
     if (newChecks.length > 0) {
       event.checks = newChecks;
+      // Companion display data for the synthetic "all 3 titles cleared" id
+      // (903) -- see validation.js's isValidGameClearTime. Only attached
+      // alongside a genuinely-new checks entry, never on its own.
+      if (body.gameClearTime !== undefined) {
+        event.gameClearTime = body.gameClearTime;
+      }
     }
     events.push(event);
     const trimmed = events.slice(-MAX_EVENTS);

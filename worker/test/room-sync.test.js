@@ -14,11 +14,11 @@ async function initRoom(stub, mode) {
   });
 }
 
-function sync(stub, checksSeen, epoch, shareFlags, items = new Array(96).fill(0), checks = new Array(96).fill(0)) {
+function sync(stub, checksSeen, epoch, shareFlags, items = new Array(96).fill(0)) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen, epoch, shareFlags, items, checks }),
+    body: JSON.stringify({ checksSeen, epoch, shareFlags, items }),
   });
 }
 
@@ -268,122 +268,5 @@ describe("RoomDO /sync", () => {
     await sync(stub, new Array(96).fill(0), 0, undefined, incoming);
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status.mergedItemsBitsSet).toBe(1);
-  });
-
-  it("defaults to an empty checks array before any progress is shared", async () => {
-    const stub = getStub("test-room-sync-22");
-    await initRoom(stub, "checksSeen+items+checks");
-    const res = await sync(stub, new Array(96).fill(0), 0);
-    expect((await res.json()).checks).toEqual(new Array(96).fill(0));
-  });
-
-  it("OR-merges checks unconditionally across players in checksSeen+items+checks mode", async () => {
-    const stub = getStub("test-room-sync-23");
-    await initRoom(stub, "checksSeen+items+checks");
-
-    const playerAChecks = new Array(96).fill(0);
-    playerAChecks[0] = 0b0001; // check id 0
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), playerAChecks);
-
-    const playerBChecks = new Array(96).fill(0);
-    playerBChecks[30] = 0b1000; // check id 243, 1ChAAClear -- unrelated to any item category
-    const res = await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), playerBChecks);
-
-    const { checks } = await res.json();
-    expect(checks[0]).toBe(0b0001);
-    expect(checks[30]).toBe(0b1000);
-  });
-
-  it("does not merge checks in checksSeen+items mode (checks required but not folded in)", async () => {
-    const stub = getStub("test-room-sync-24");
-    await initRoom(stub, "checksSeen+items");
-    const incomingChecks = new Array(96).fill(0);
-    incomingChecks[0] = 0xff;
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), incomingChecks);
-    const { checks } = await (await sync(stub, new Array(96).fill(0), 0)).json();
-    expect(checks.every((b) => b === 0)).toBe(true);
-  });
-
-  it("does not merge checks in plain checksSeen mode", async () => {
-    const stub = getStub("test-room-sync-25");
-    await initRoom(stub, "checksSeen");
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), new Array(96).fill(0xff));
-    const { checks } = await (await sync(stub, new Array(96).fill(0), 0)).json();
-    expect(checks.every((b) => b === 0)).toBe(true);
-  });
-
-  it("still merges items unconditionally in checksSeen+items+checks mode (verbatim continuation of checksSeen+items)", async () => {
-    const stub = getStub("test-room-sync-26");
-    await initRoom(stub, "checksSeen+items+checks");
-    const incomingItems = new Array(96).fill(0);
-    incomingItems[5] = 0x01; // id 40, no category -- must still merge, same as checksSeen+items
-    await sync(stub, new Array(96).fill(0), 0, undefined, incomingItems);
-    const { mergedItems } = await (await sync(stub, new Array(96).fill(0), 0)).json();
-    expect(mergedItems[5]).toBe(0x01);
-  });
-
-  it("discards a stale client's checks contribution the same way it discards checksSeen/items", async () => {
-    const stub = getStub("test-room-sync-27");
-    await initRoom(stub, "checksSeen+items+checks");
-
-    const freshChecks = new Array(96).fill(0);
-    freshChecks[0] = 0b0001;
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), freshChecks);
-
-    await stub.fetch("https://do/admin/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ adminSecret: "test-secret" }),
-    });
-
-    const staleChecks = new Array(96).fill(0);
-    staleChecks[1] = 0b0010;
-    const res = await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), staleChecks); // still reporting epoch 0
-
-    const data = await res.json();
-    expect(data.epoch).toBe(1);
-    expect(data.checks.every((b) => b === 0)).toBe(true);
-  });
-
-  it("zeroes checks on reset", async () => {
-    const stub = getStub("test-room-sync-28");
-    await initRoom(stub, "checksSeen+items+checks");
-    const incomingChecks = new Array(96).fill(0);
-    incomingChecks[0] = 0b0001;
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), incomingChecks);
-    const before = await (await sync(stub, new Array(96).fill(0), 0)).json();
-    expect(before.checks[0]).toBe(0b0001);
-
-    await stub.fetch("https://do/admin/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ adminSecret: "test-secret" }),
-    });
-    const after = await (await sync(stub, new Array(96).fill(0), 1)).json();
-    expect(after.checks).toEqual(new Array(96).fill(0));
-  });
-
-  it("rejects a sync missing the checks field, or with the wrong length", async () => {
-    const stub = getStub("test-room-sync-29");
-    await initRoom(stub, "checksSeen");
-    const res1 = await stub.fetch("https://do/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0 }), // no checks at all
-    });
-    expect(res1.status).toBe(400);
-
-    const res2 = await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), [0, 1, 2]);
-    expect(res2.status).toBe(400);
-  });
-
-  it("reflects merged check bits in admin/status's checksBitsSet after a /sync merge", async () => {
-    const stub = getStub("test-room-sync-30");
-    await initRoom(stub, "checksSeen+items+checks");
-    const incomingChecks = new Array(96).fill(0);
-    incomingChecks[0] = 0b0011; // 2 bits set
-    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), incomingChecks);
-    const status = await (await stub.fetch("https://do/admin/status")).json();
-    expect(status.checksBitsSet).toBe(2);
   });
 });

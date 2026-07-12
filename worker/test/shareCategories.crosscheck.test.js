@@ -8,15 +8,15 @@ import { shareCategoryForId } from "../src/shareCategories.js";
 let ITEM_ID_MAP;
 let shareCategoryFor;
 
-// Cross-checks against tracker/icon_map.js's shareCategoryFor (string-code
-// based) for every real id in tracker/item_id_map.js, guarding the two
-// independent implementations against drifting apart -- see
-// docs/superpowers/specs/2026-07-10-item-merge-mode-design.md's
+// Cross-checks against pages/tracker/icon_map.js's shareCategoryFor
+// (string-code based) for every real id in pages/tracker/item_id_map.js,
+// guarding the two independent implementations against drifting apart --
+// see docs/superpowers/specs/2026-07-10-item-merge-mode-design.md's
 // Verification section.
 describe("shareCategoryForId matches tracker/icon_map.js's shareCategoryFor", () => {
   beforeAll(() => {
     const dir = path.dirname(fileURLToPath(import.meta.url));
-    const trackerDir = path.join(dir, "..", "..", "tracker");
+    const trackerDir = path.join(dir, "..", "..", "pages", "tracker");
     const context = {};
     vm.createContext(context);
 

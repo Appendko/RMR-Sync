@@ -1,15 +1,14 @@
-const VALID_MODES = ["checksSeen", "checksSeen+shared", "checksSeen+items", "checksSeen+items+checks"];
+const VALID_MODES = ["checksSeen", "checksSeen+shared", "checksSeen+items"];
 const CHECKS_SEEN_LENGTH = 96;
 const ITEMS_LENGTH = 96;
-const CHECKS_LENGTH = 96;
 const SHARE_FLAG_KEYS = ["lifeUp", "energyUp", "armor", "subTank", "finalWeapon", "sigmaKey", "upgradeItem"];
 
 export function isValidMode(mode) {
   return VALID_MODES.includes(mode);
 }
 
-// checksSeen, items, and checks are all 96-byte arrays, one bit per id (byte
-// Math.floor(id/8), bit id % 8) -- shared validator, exposed under three
+// checksSeen and items are both 96-byte arrays, one bit per id (byte
+// Math.floor(id/8), bit id % 8) -- shared validator, exposed under two
 // names so each call site stays self-documenting.
 function isValidByteArray(arr, length) {
   if (!Array.isArray(arr) || arr.length !== length) return false;
@@ -28,18 +27,24 @@ export function isValidItemsArray(arr) {
   return isValidByteArray(arr, ITEMS_LENGTH);
 }
 
-// The client's full 96-byte real check-completion snapshot
-// (lua/share_info.lua's readChecks(), reading sessionSave.checks -- same
-// shape as checksSeen, but real progress rather than scouted/hinted
-// visibility), sent on every /sync alongside checksSeen/items so
-// room.js's handleSync can OR-merge it across players into a room-level
-// `checks` state, in checksSeen+items+checks mode only.
-export function isValidChecksArray(arr) {
-  return isValidByteArray(arr, CHECKS_LENGTH);
+// Upper bound is 999, not 767: real item/check ids top out at 767, but
+// tracker/check_id_map.js also defines a handful of synthetic ids at 900+
+// (e.g. 900/901/902 for "title fully cleared", reported through this same
+// `checks` field -- see lua/share_info.lua's checkForNewGameClear) that
+// aren't real bit positions in any 96-byte array, just event-feed display
+// ids. Headroom is intentional for future milestone ids in that same band.
+function isValidIdArray(arr) {
+  return Array.isArray(arr) && arr.length > 0 && arr.length <= 20 && arr.every((id) => Number.isInteger(id) && id >= 0 && id <= 999);
 }
 
-function isValidIdArray(arr) {
-  return Array.isArray(arr) && arr.length > 0 && arr.length <= 20 && arr.every((id) => Number.isInteger(id) && id >= 0 && id <= 767);
+// Companion to the synthetic "all 3 titles cleared" check id (903) --
+// lua/share_logic.lua's ShareLogic.formatClearTime's "H:MM:SS" output,
+// carried alongside so pages/tracker/event_feed.js can substitute it into
+// that id's translated "{time}" placeholder. Loosely format-checked (not
+// just "any string") since it ends up broadcast to every connected tracker.
+const GAME_CLEAR_TIME_PATTERN = /^\d{1,3}:\d{2}:\d{2}$/;
+export function isValidGameClearTime(value) {
+  return value === undefined || (typeof value === "string" && GAME_CLEAR_TIME_PATTERN.test(value));
 }
 
 export function validateEventBody(body) {
@@ -58,10 +63,13 @@ export function validateEventBody(body) {
     return "body must include at least one of items or checks";
   }
   if (hasItems && !isValidIdArray(body.items)) {
-    return "items must be a non-empty array of up to 20 integer ids between 0 and 767";
+    return "items must be a non-empty array of up to 20 integer ids between 0 and 999";
   }
   if (hasChecks && !isValidIdArray(body.checks)) {
-    return "checks must be a non-empty array of up to 20 integer ids between 0 and 767";
+    return "checks must be a non-empty array of up to 20 integer ids between 0 and 999";
+  }
+  if (!isValidGameClearTime(body.gameClearTime)) {
+    return "gameClearTime must be an H:MM:SS string";
   }
   return null;
 }

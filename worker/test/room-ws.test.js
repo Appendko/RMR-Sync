@@ -55,7 +55,7 @@ describe("RoomDO /ws", () => {
     await stub.fetch("https://do/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), checks: new Array(96).fill(0), epoch: 0, shareFlags: { sigmaKey: true } }),
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0, shareFlags: { sigmaKey: true } }),
     });
 
     const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });

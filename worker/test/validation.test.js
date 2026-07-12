@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, isValidItemsArray, isValidChecksArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags, isValidGameClearTime } from "../src/validation.js";
 
 describe("isValidMode", () => {
-  it("accepts the four known modes", () => {
+  it("accepts the three known modes", () => {
     expect(isValidMode("checksSeen")).toBe(true);
     expect(isValidMode("checksSeen+shared")).toBe(true);
     expect(isValidMode("checksSeen+items")).toBe(true);
-    expect(isValidMode("checksSeen+items+checks")).toBe(true);
   });
 
   it("rejects anything else", () => {
@@ -14,6 +13,7 @@ describe("isValidMode", () => {
     expect(isValidMode(undefined)).toBe(false);
     expect(isValidMode(123)).toBe(false);
     expect(isValidMode("checksSeen+item")).toBe(false);
+    expect(isValidMode("checksSeen+items+checks")).toBe(false);
   });
 });
 
@@ -67,31 +67,6 @@ describe("isValidItemsArray", () => {
   });
 });
 
-describe("isValidChecksArray", () => {
-  it("accepts a 96-length array of byte values", () => {
-    expect(isValidChecksArray(new Array(96).fill(0))).toBe(true);
-  });
-
-  it("rejects wrong length", () => {
-    expect(isValidChecksArray(new Array(95).fill(0))).toBe(false);
-  });
-
-  it("rejects out-of-range or non-integer values", () => {
-    const bad1 = new Array(96).fill(0);
-    bad1[0] = 256;
-    expect(isValidChecksArray(bad1)).toBe(false);
-
-    const bad2 = new Array(96).fill(0);
-    bad2[0] = 1.5;
-    expect(isValidChecksArray(bad2)).toBe(false);
-  });
-
-  it("rejects non-arrays", () => {
-    expect(isValidChecksArray("not an array")).toBe(false);
-    expect(isValidChecksArray(null)).toBe(false);
-  });
-});
-
 describe("validateEventBody", () => {
   const valid = { player: "ds83171", game: 2, items: [0] };
 
@@ -134,7 +109,7 @@ describe("validateEventBody", () => {
   it("rejects non-integer or out-of-range item entries", () => {
     expect(validateEventBody({ ...valid, items: ["not-a-number"] })).toMatch(/items/);
     expect(validateEventBody({ ...valid, items: [-1] })).toMatch(/items/);
-    expect(validateEventBody({ ...valid, items: [768] })).toMatch(/items/);
+    expect(validateEventBody({ ...valid, items: [1000] })).toMatch(/items/);
     expect(validateEventBody({ ...valid, items: [1.5] })).toMatch(/items/);
   });
 
@@ -145,12 +120,53 @@ describe("validateEventBody", () => {
 
   it("rejects non-integer or out-of-range check entries", () => {
     expect(validateEventBody({ player: "a", game: 1, checks: [-1] })).toMatch(/checks/);
-    expect(validateEventBody({ player: "a", game: 1, checks: [768] })).toMatch(/checks/);
+    expect(validateEventBody({ player: "a", game: 1, checks: [1000] })).toMatch(/checks/);
+  });
+
+  it("accepts the synthetic 900-902 game-clear check ids (see tracker/check_id_map.js)", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [900] })).toBeNull();
+    expect(validateEventBody({ player: "a", game: 2, checks: [901] })).toBeNull();
+    expect(validateEventBody({ player: "a", game: 3, checks: [902] })).toBeNull();
+  });
+
+  it("accepts the id range up to 999, rejecting just past it", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [999] })).toBeNull();
+    expect(validateEventBody({ player: "a", game: 1, checks: [1000] })).toMatch(/checks/);
+  });
+
+  it("accepts the synthetic 903 all-clear check id with a companion gameClearTime", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [903], gameClearTime: "1:23:56" })).toBeNull();
+  });
+
+  it("omitting gameClearTime is fine (it's optional on every other event)", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [900] })).toBeNull();
+  });
+
+  it("rejects a malformed gameClearTime", () => {
+    expect(validateEventBody({ player: "a", game: 1, checks: [903], gameClearTime: "not a time" })).toMatch(/gameClearTime/);
+    expect(validateEventBody({ player: "a", game: 1, checks: [903], gameClearTime: 5036 })).toMatch(/gameClearTime/);
+    expect(validateEventBody({ player: "a", game: 1, checks: [903], gameClearTime: "1:2:03" })).toMatch(/gameClearTime/);
   });
 
   it("rejects a non-object body", () => {
     expect(validateEventBody(null)).toMatch(/object/);
     expect(validateEventBody("nope")).toMatch(/object/);
+  });
+});
+
+describe("isValidGameClearTime", () => {
+  it("accepts undefined and well-formed H:MM:SS strings", () => {
+    expect(isValidGameClearTime(undefined)).toBe(true);
+    expect(isValidGameClearTime("0:00:00")).toBe(true);
+    expect(isValidGameClearTime("1:23:56")).toBe(true);
+    expect(isValidGameClearTime("123:00:00")).toBe(true);
+  });
+
+  it("rejects malformed strings and non-strings", () => {
+    expect(isValidGameClearTime("1:2:3")).toBe(false);
+    expect(isValidGameClearTime("abc")).toBe(false);
+    expect(isValidGameClearTime(123)).toBe(false);
+    expect(isValidGameClearTime(null)).toBe(false);
   });
 });
 
