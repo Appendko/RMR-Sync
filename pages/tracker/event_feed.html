@@ -21,6 +21,10 @@
     image-rendering: pixelated;
   }
   .entry .item-label { font-size: 1rem; color: #ccc; }
+  /* Stage-clear/boss-defeat/game-clear events are milestones, not routine
+     pickups -- heavy weight + a brighter warm tint sets them apart without
+     needing an "[Event]" text prefix. */
+  .entry .check-item .item-label { font-weight: 800; color: #ffd76b; }
   .entry.status-line { color: #999; font-size: 0.85rem; font-style: italic; }
 
   #settingsHotspot {
@@ -113,7 +117,7 @@
     </label>
     <label class="checkbox-label">
       <input type="checkbox" id="settingsShowChecks" />
-      Show check completions
+      Show events (stage clears, boss defeats)
     </label>
     <label>Item name language
       <select id="settingsLang">

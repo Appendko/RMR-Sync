@@ -1,4 +1,4 @@
-// One-off generator for tracker/item_names_en.js. Run with:
+// One-off generator for pages/tracker/item_names_en.js. Run with:
 //   node scripts/generate_item_names_en.js
 // from the repo root. Regenerate only if ref/multiworld/lua/itemName.lua ever changes.
 //
@@ -14,7 +14,7 @@ const path = require("path");
 
 const repoRoot = path.join(__dirname, "..");
 const luaPath = path.join(repoRoot, "ref/multiworld/lua/itemName.lua");
-const outPath = path.join(repoRoot, "tracker/item_names_en.js");
+const outPath = path.join(repoRoot, "pages/tracker/item_names_en.js");
 
 const src = fs.readFileSync(luaPath, "utf8");
 
@@ -37,7 +37,7 @@ function copy(dest, source) {
 // the *meaning* is different (kana-placeholder wildcard vs. RMR's "same as game 1"
 // bank), so it's intentionally skipped here. RMR's M-bank names are resolved at
 // lookup time by cross-referencing to the "1"-prefixed equivalent id instead (see
-// getItemNameForId in tracker/icon_map.js), the same pattern already used for icons.
+// getItemNameForId in pages/tracker/icon_map.js), the same pattern already used for icons.
 for (let t = 0; t <= 2; t++) {
   const base = t * 0x100;
   for (let i = 1; i <= 0xd; i++) {

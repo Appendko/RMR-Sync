@@ -30,7 +30,6 @@
   <option value="checksSeen">Seen</option>
   <option value="checksSeen+shared">Seen + Common Items</option>
   <option value="checksSeen+items">Seen + All Items</option>
-  <option value="checksSeen+items+checks">Seen + All Items + Progress</option>
 </select>
 
 <button id="createBtn">Create Room</button>
@@ -42,6 +41,19 @@
 
 <script src="room_key.js"></script>
 <script>
+// Display-only -- the wire mode strings themselves are unchanged (see
+// worker/src/validation.js's VALID_MODES / pages/tracker/event_feed.js's own
+// identical MODE_LABELS). A regular host has no reason to read boot.lua to
+// know what "checksSeen+shared" means.
+const MODE_LABELS = {
+  checksSeen: "Seen",
+  "checksSeen+shared": "Seen + Common Items",
+  "checksSeen+items": "Seen + All Items",
+};
+function friendlyModeLabel(mode) {
+  return mode ? (MODE_LABELS[mode] ?? mode) : "(not created yet)";
+}
+
 function getBaseUrl() {
   return document.getElementById("workerUrl").value.trim().replace(/\/$/, "");
 }
@@ -70,7 +82,7 @@ async function createRoom() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    showStatus(`Room mode: ${data.mode}${data.created ? " (just created)" : " (already existed)"}`, false);
+    showStatus(`Room mode: ${friendlyModeLabel(data.mode)}${data.created ? " (just created)" : " (already existed)"}`, false);
   } catch (err) {
     showStatus(`Create failed: ${err.message}`, true);
   }
@@ -88,7 +100,7 @@ async function resetRoom() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    showStatus(`Room reset. Mode: ${data.mode}`, false);
+    showStatus(`Room reset. Mode: ${friendlyModeLabel(data.mode)}`, false);
   } catch (err) {
     showStatus(`Reset failed: ${err.message}`, true);
   }
@@ -118,17 +130,13 @@ async function refreshStatus() {
     if (data.mode) {
       document.getElementById("mode").value = data.mode;
     }
-    const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items" || data.mode === "checksSeen+items+checks")
+    const itemsLine = (data.mode === "checksSeen+shared" || data.mode === "checksSeen+items")
       ? `merged item bits set: ${data.mergedItemsBitsSet}\n`
       : "";
-    const checksLine = (data.mode === "checksSeen+items+checks")
-      ? `merged checks bits set: ${data.checksBitsSet}\n`
-      : "";
     showStatus(
-      `mode: ${data.mode ?? "(not created yet)"}\n` +
+      `mode: ${friendlyModeLabel(data.mode)}\n` +
       `checksSeen bits set: ${data.checksSeenBitsSet}\n` +
       itemsLine +
-      checksLine +
       `event count: ${data.eventCount}\n` +
       `connected trackers: ${data.connected}`,
       false

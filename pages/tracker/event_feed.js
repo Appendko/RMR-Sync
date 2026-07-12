@@ -18,7 +18,6 @@ const MODE_LABELS = {
   checksSeen: "Seen",
   "checksSeen+shared": "Seen + Common Items",
   "checksSeen+items": "Seen + All Items",
-  "checksSeen+items+checks": "Seen + All Items + Progress",
 };
 function friendlyModeLabel(mode) {
   return mode ? (MODE_LABELS[mode] ?? mode) : "not created yet";
@@ -268,16 +267,41 @@ function renderEntry(event, showText, lang, shareFlags, showItems, showChecks) {
     entry.appendChild(item);
   }
 
-  // Checks have no icon/sprite -- just the raw short code (or an authored
-  // name, once tracker/check_names_en.js etc. have entries) as text.
+  // lua/share_info.lua's checkForNewChecks() only ever reports "event"
+  // check ids (stage clears, boss defeats -- see ShareLogic.isEventCheckId)
+  // to the event feed, never plain randomized-item pickup locations (those
+  // are already covered by realItems above), so every entry here really is
+  // an achievement, not a location visit. Bold weight (not an "[Event]" text
+  // prefix) is what sets these apart from a regular pickup -- see the
+  // .check-item .item-label rule in event_feed.html.
   for (const checkId of realChecks) {
-    const name = getCheckNameForId(checkId, lang);
+    // A handful of synthetic ids (currently just 903, "all 3 titles
+    // cleared") carry dynamic data alongside the static translated name --
+    // a literal "{time}" placeholder in the name string, filled in from
+    // event.gameClearTime (lua/share_logic.lua's ShareLogic.formatClearTime,
+    // an H:MM:SS string). Every other id's name has no such placeholder, so
+    // this is a no-op for them.
+    const name = getCheckNameForId(checkId, lang).replace("{time}", event.gameClearTime ?? "");
+    // A dedicated boss-portrait file (see check_lookup.js's
+    // getCheckIconInfoForId), deliberately different art from the weapon
+    // icon icon_map.js shows for that same boss's weapon pickup -- "defeated
+    // Storm Eagle" and "picked up Storm Eagle's weapon" are different events.
+    // Ids with no portrait art available (opening-stage clears, X-Hunter
+    // defeats) fall through to the generic icon.
+    const info = getCheckIconInfoForId(checkId);
     const item = document.createElement("span");
     item.className = "item check-item";
-    const text = document.createElement("span");
-    text.className = "item-label";
-    text.textContent = `[Check] ${name}`;
-    item.appendChild(text);
+    const img = document.createElement("img");
+    img.src = info.file;
+    img.alt = name;
+    img.title = name;
+    item.appendChild(img);
+    if (showText) {
+      const text = document.createElement("span");
+      text.className = "item-label";
+      text.textContent = name;
+      item.appendChild(text);
+    }
     entry.appendChild(item);
   }
 

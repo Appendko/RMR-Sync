@@ -1,7 +1,7 @@
 const GENERIC_ICON = "assets/x.png";
 
 // Sprite-sliced icon source (primary icon path — see getSpritePositionForId below).
-// Ported from tracker/icon_audit.js's proven, owner-approved implementation.
+// Ported from pages/tracker/icon_audit.js's proven, owner-approved implementation.
 const SPRITE_SHEET_FILE = "assets/item_icon_sheet.png";
 const SPRITE_TILE_PX = 16;
 const SPRITE_SHEET_NATIVE_W = 128;
@@ -139,7 +139,7 @@ function getSpritePositionForId(numericId) {
 }
 
 // Localized item names, ported/derived from the original game's own name tables
-// (see tracker/item_names_en.js / item_names_ja.js / item_names_zhtw.js for
+// (see pages/tracker/item_names_en.js / item_names_ja.js / item_names_zhtw.js for
 // provenance). SUPPORTED_LANGS order also drives the settings-panel dropdown in
 // event_feed.js.
 const ITEM_NAME_TABLES = { en: ITEM_NAMES_EN, ja: ITEM_NAMES_JA, "zh-TW": ITEM_NAMES_ZHTW };

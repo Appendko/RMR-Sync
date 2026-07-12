@@ -230,3 +230,63 @@ common Items").
   one `/sync` cycle, and that the event feed shows it as a distinct
   check-completion line (using the raw short code) that can be toggled off
   via the new checkbox without affecting item-pickup lines.
+
+## Addendum (2026-07-12): Progress mode removed — checks became local-only events
+
+Manual testing never actually happened (see above) before a closer read of
+`ref/aaa/boot.lua` turned up two problems with the 4th tier as originally
+shipped:
+
+1. **The write-back was actively wrong, not just useless.** `writeChecks()`
+   applied a merged, cross-player `checks` array into
+   `sessionSave.checks`/`addrChecks`. Nothing reads that back into "is this
+   boss actually defeated" for the *active* title (that's driven by the
+   game's own RAM, refreshed into `sessionSave.checks` one-way by
+   `synchronize_or`) — so the merge could never grant a teammate's
+   boss-defeat. But `boot.lua`'s own `synchronizeHintInfo()` *does* read
+   `sessionSave.checks` directly for the two titles NOT currently active, to
+   advance the in-game hint pointer — so the merge was silently corrupting
+   that pointer with a teammate's unrelated progress. `writeChecks()` and
+   the local-apply step in `tryConsumeInbox()` were deleted outright; real
+   check-completion progress is never written back to WRAM/sessionSave by
+   this project, in any mode.
+
+2. **A "check" conflates two different things.** A *location* is a
+   randomized pickup spot — after randomization it holds a different item,
+   so its completion state is just item ownership, already covered by the
+   items merge. An *event* (stage clear, boss defeat) is the same
+   achievement regardless of randomization, and is the only part of
+   `checks` actually worth announcing to teammates. Syncing the full
+   96-byte `checks` array was re-deriving item-ownership info a second,
+   redundant way while giving no special treatment to the event subset.
+
+**Resulting design change:** the `checksSeen+items+checks` mode (`"Seen +
+All Items + Progress"`) is removed entirely — back to 3 modes
+(`checksSeen` / `checksSeen+shared` / `checksSeen+items`). `checks` are
+never synced or merged across the network in any form (no `checks` field in
+`/sync`, no room-level merged-checks state, no `checksBitsSet` in
+`/admin/status`). Instead, `lua/share_info.lua`'s `checkForNewChecks()` runs
+unconditionally in all 3 modes (previously gated to the now-removed 4th
+tier), reads `sessionSave.checks` purely as a local diffing baseline, and
+filters newly-completed check ids down to the "event" subset
+(`ShareLogic.isEventCheckId`, a static 45-id list — the 40 per-stage
+`...Clear` flags plus the 5 one-off boss defeats: Bit, Byte, Violen,
+Serges, Agile) before reporting them through the *existing* `/event`
+channel — the same broadcast-only, no-merge mechanism item pickups already
+use. `worker/src/room.js`'s `handleEvent` no longer gates `checks` by mode
+at all (item pickups are still gated to sharing modes); a `checks` field is
+accepted and broadcast in every mode, including plain `checksSeen`.
+
+`tracker/check_id_map.js` gained a matching `EVENT_CHECK_IDS` `Set` (mirrored
+1:1 with the Lua list) so `tracker/check_audit.html` can flag which rows are
+events. The event feed's "Show check completions" checkbox is relabeled
+"Show events" and its entries render with an `[Event]` prefix instead of
+`[Check]`, since every check id that ever reaches the feed is now, by
+construction, an event rather than a location.
+
+`tracker/check_audit.html`/`check_audit.js` also gained inline-editable name
+inputs per language (prefilled from the current `check_names_XX.js`, empty
+inputs show the fallback short code as a placeholder) and an Export button
+per language that downloads a ready-to-commit `check_names_XX.js` built from
+whatever's currently typed — no server or build step, so a non-technical
+translator can fill in names directly in the page.

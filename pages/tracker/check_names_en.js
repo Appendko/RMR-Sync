@@ -1,8 +1,53 @@
-// English check-completion names, keyed by the same global id CHECK_ID_MAP
-// uses. Empty for now -- see tracker/check_audit.html to author these
-// against the raw ported short codes in CHECK_ID_MAP. A confident
-// best-effort pass wasn't done here: several short codes' boss-abbreviation
-// initials don't cleanly match known Mega Man X boss names without further
-// verification (e.g. the X1 set's "BN"/"IP" codes), so guessing risked
-// embedding wrong names into the very file meant to fix that.
-const CHECK_NAMES_EN = {};
+// Check-completion names (en), keyed by the same global id
+// CHECK_ID_MAP uses. Exported from pages/tracker/check_audit.html.
+const CHECK_NAMES_EN = {
+  240: "[1] Opening Stage Defeated",
+  241: "[1] Launch Octopus Defeated",
+  242: "[1] Sting Chameleon Defeated",
+  243: "[1] Armored Armadillo Defeated",
+  244: "[1] Flame Mammoth Defeated",
+  245: "[1] Storm Eagle Defeated",
+  246: "[1] Spark Mandrill Defeated",
+  247: "[1] Boomer Kuwanger Defeated",
+  248: "[1] Chill Penguin Defeated",
+  249: "[1] Sigma Stage 1 Defeated",
+  250: "[1] Sigma Stage 2 Defeated",
+  251: "[1] Sigma Stage 3 Defeated",
+  493: "[2] Violen Defeated",
+  494: "[2] Serges Defeated",
+  495: "[2] Agile Defeated",
+  496: "[2] Opening Stage Defeated",
+  497: "[2] Morph Moth Defeated",
+  498: "[2] Wire Sponge Defeated",
+  499: "[2] Bubble Crab Defeated",
+  500: "[2] Flame Stag Defeated",
+  501: "[2] Magna Centipede Defeated",
+  502: "[2] Crystal Snail Defeated",
+  503: "[2] Overdrive Ostrich Defeated",
+  504: "[2] Wheel Gator Defeated",
+  505: "[2] Sigma Stage 1 Defeated",
+  506: "[2] Sigma Stage 2 Defeated",
+  507: "[2] Sigma Stage 3 Defeated",
+  508: "[2] Sigma Stage 4 Defeated",
+  750: "[3] Bit Defeated",
+  751: "[3] Byte Defeated",
+  752: "[3] Opening Stage Defeated",
+  753: "[3] Blast Hornet Defeated",
+  754: "[3] Blizzard Buffalo Defeated",
+  755: "[3] Gravity Beetle Defeated",
+  756: "[3] Toxic Seahorse Defeated",
+  757: "[3] Volt Catfish Defeated",
+  758: "[3] Crush Crawfish Defeated",
+  759: "[3] Tunnel Rhino Defeated",
+  760: "[3] Neon Tiger Defeated",
+  761: "[3] Vile Defeated",
+  762: "[3] Sigma Stage 1a Defeated",
+  763: "[3] Sigma Stage 2a Defeated",
+  764: "[3] Sigma Stage 3 Defeated",
+  765: "[3] Sigma Stage 1b Defeated",
+  766: "[3] Sigma Stage 2b Defeated",
+  900: "Mega Man X1 Cleared!",
+  901: "Mega Man X2 Cleared!",
+  902: "Mega Man X3 Cleared!",
+  903: "All Clear! Game Time {time}",
+};

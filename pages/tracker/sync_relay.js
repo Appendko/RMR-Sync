@@ -96,10 +96,17 @@ async function tick() {
       resp.sync = syncData;
       resp.ok = true;
       for (const ev of req.events || []) {
+        // JSON.stringify drops undefined keys, so this is correct whether ev
+        // carries items, checks, both, or checks+gameClearTime (the
+        // synthetic game-clear/all-clear ids) -- forwarding only `items`
+        // here silently dropped every checks-only event server-side (400:
+        // "must include at least one of items or checks"), with no visible
+        // error since only the top-level /sync error surfaces in the status
+        // line below.
         const evResp = await fetch(`${room}/event`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ player: req.player, game: ev.game, items: ev.items }),
+          body: JSON.stringify({ player: req.player, game: ev.game, items: ev.items, checks: ev.checks, gameClearTime: ev.gameClearTime }),
         });
         if (evResp.ok) resp.eventsPosted++;
       }

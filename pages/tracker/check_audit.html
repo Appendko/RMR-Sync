@@ -5,21 +5,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>RMR Sync — Check Name Audit (diagnostic, not player-facing)</title>
 <style>
-  body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+  body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
   h1 { font-size: 1.2rem; }
   p.note { font-size: 0.85rem; color: #999; }
-  #controls { margin-bottom: 1rem; }
+  #controls { margin-bottom: 1rem; display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
   #controls input[type="text"] { padding: 0.3rem 0.5rem; font-size: 0.95rem; min-width: 220px; }
+  #exportButtons { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  #exportButtons button { padding: 0.4rem 0.7rem; font-size: 0.85rem; cursor: pointer; background: #223; color: #eee; border: 1px solid #446; border-radius: 4px; }
+  #exportButtons button:hover { background: #334; }
   #stats { font-size: 0.85rem; color: #999; margin-bottom: 0.8rem; }
   table { border-collapse: collapse; width: 100%; }
   thead th { text-align: left; position: sticky; top: 0; background: #111; border-bottom: 1px solid #444; padding: 0.4rem 0.6rem; font-size: 0.85rem; color: #ccc; }
   tbody tr { border-bottom: 1px solid #222; }
   tbody tr.hidden { display: none; }
-  td { padding: 0.4rem 0.6rem; vertical-align: middle; font-size: 0.9rem; }
-  td.id-cell { width: 3.5rem; color: #999; }
-  td.code-cell { font-family: monospace; }
-  td.name-cell { max-width: 220px; }
-  td.name-cell.name-fallback { color: #f88; font-style: italic; }
+  td { padding: 0.3rem 0.5rem; vertical-align: middle; font-size: 0.9rem; }
+  td.id-cell { width: 3.2rem; color: #999; }
+  td.code-cell { font-family: monospace; white-space: nowrap; }
+  td.event-cell { width: 4.5rem; }
+  .event-badge { font-size: 0.7rem; font-weight: bold; color: #1a1400; background: #e0b84a; padding: 0.1rem 0.35rem; border-radius: 3px; }
+  td.name-cell { min-width: 180px; }
+  input.name-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.9rem;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #eee;
+    border-radius: 3px;
+  }
+  input.name-input:focus { border-color: #6cf; outline: none; }
+  input.name-input:placeholder-shown { color: #f88; font-style: italic; border-color: #522; }
 </style>
 </head>
 <body>
@@ -27,11 +43,13 @@
 <p class="note">
   Standalone diagnostic/authoring page. Not linked from the player-facing UI. Each row is one
   real check-completion id, alongside its raw ported short code (from the original AutoTracker
-  project's own id map) and each language's current name. Cells in red italics have no name
-  authored yet, showing the raw code as a fallback -- edit
-  <code>tracker/check_names_en.js</code> / <code>_ja.js</code> / <code>_zhtw.js</code> to fill
-  these in.
+  project's own id map), an EVENT badge for stage-clear/boss-defeat ids (the only ones ever
+  reported to the event feed -- see EVENT_CHECK_IDS in <code>check_id_map.js</code>), and an
+  editable name per language. Fields in red italics show the raw code as a placeholder and have
+  no name authored yet -- type directly into the field, then use the Export buttons below to
+  download a ready-to-commit <code>check_names_en.js</code> / <code>_ja.js</code> / <code>_zhtw.js</code>.
 </p>
+<div id="exportButtons"></div>
 <div id="controls">
   <input type="text" id="filterInput" placeholder="Filter by short code substring…" autocomplete="off" />
 </div>
@@ -41,6 +59,7 @@
     <tr>
       <th>ID</th>
       <th>Short code</th>
+      <th>Kind</th>
       <th>EN name</th>
       <th>JA name</th>
       <th>zh-TW name</th>

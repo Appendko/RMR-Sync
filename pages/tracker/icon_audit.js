@@ -25,7 +25,7 @@ const SCALE = DISPLAY_PX / SPRITE_TILE_PX; // uniform upscale factor, kept propo
 
 // Regex for the already-reported reused-icon bug this tool is meant to surface clearly:
 // ItLifeS/ItLifeL wrongly reuse ItLifeUp's icon; ItWeaponS/ItWeaponL wrongly reuse
-// ItEnergyUp's icon; ItFullRecover also reuses ItLifeUp's icon. See tracker/icon_map.js
+// ItEnergyUp's icon; ItFullRecover also reuses ItLifeUp's icon. See pages/tracker/icon_map.js
 // SIMPLE_RULES for the current (buggy) rules.
 const KNOWN_BUG_PATTERN = /^ItLife[SL]$|^ItWeapon[SL]$|^ItFullRecover$/;
 
@@ -232,7 +232,7 @@ if (typeof document !== "undefined") {
 // Exposed for headless verification (e.g. `node --check` plus manual spot-checks); harmless
 // in the browser since nothing else references a global `module`. The sprite-slicing logic
 // itself (computeSpritePosition/getSpritePositionForId/CODE_TO_ID) now lives solely in
-// icon_map.js and is covered by tracker/icon_map.test.mjs.
+// icon_map.js and is covered by pages/tracker/icon_map.test.mjs.
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { KNOWN_BUG_PATTERN };
 }

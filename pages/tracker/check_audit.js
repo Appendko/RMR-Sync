@@ -1,11 +1,18 @@
-// RMR Sync -- Check Name Audit (diagnostic tool, not part of the shipped
-// player-facing UI). Renders one row per CHECK_ID_MAP entry: id, the raw
-// ported short code, and each language's current name (or a highlighted
-// "fallback" state -- the raw code again -- when no name has been authored
-// yet). Mirrors tracker/icon_audit.js's pattern; no icon columns, since
-// checks have no sprite-sheet equivalent.
+// RMR Sync -- Check Name Audit (diagnostic + authoring tool, not part of the
+// shipped player-facing UI). Renders one row per CHECK_ID_MAP entry: id, the
+// raw ported short code, an EVENT badge (see EVENT_CHECK_IDS in
+// check_id_map.js) for stage-clear/boss-defeat ids, and an editable text
+// input per language. Empty inputs show the raw fallback code as a greyed
+// placeholder (CSS :placeholder-shown) so it's obvious at a glance which
+// rows still need a name. "Export" downloads a ready-to-commit
+// check_names_XX.js for that language, built from whatever's currently
+// typed into its column -- no server, no build step, just edit and export.
 
-const AUDIT_LANGS = ["en", "ja", "zh-TW"];
+const AUDIT_LANGS = [
+  { lang: "en", varName: "CHECK_NAMES_EN", fileName: "check_names_en.js", label: "EN" },
+  { lang: "ja", varName: "CHECK_NAMES_JA", fileName: "check_names_ja.js", label: "JA" },
+  { lang: "zh-TW", varName: "CHECK_NAMES_ZHTW", fileName: "check_names_zhtw.js", label: "zh-TW" },
+];
 
 function buildRow(id, code) {
   const tr = document.createElement("tr");
@@ -21,21 +28,36 @@ function buildRow(id, code) {
   codeTd.textContent = code;
   tr.appendChild(codeTd);
 
-  let hasNameFallback = false;
-  for (const lang of AUDIT_LANGS) {
+  const eventTd = document.createElement("td");
+  eventTd.className = "event-cell";
+  if (EVENT_CHECK_IDS.has(id)) {
+    const badge = document.createElement("span");
+    badge.className = "event-badge";
+    badge.textContent = "EVENT";
+    badge.title = "Reported to the event feed (stage clear / boss defeat) -- never synced as a location";
+    eventTd.appendChild(badge);
+  }
+  tr.appendChild(eventTd);
+
+  for (const { lang, label } of AUDIT_LANGS) {
     const nameTd = document.createElement("td");
     nameTd.className = "name-cell";
     const info = getCheckNameInfo(id, lang);
-    nameTd.textContent = info.name;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "name-input";
+    input.dataset.id = String(id);
+    input.dataset.lang = lang;
+    input.setAttribute("aria-label", `${label} name for check ${id}`);
     if (info.isFallback) {
-      hasNameFallback = true;
-      nameTd.classList.add("name-fallback");
-      nameTd.title = "no name authored yet -- showing the raw ported short code";
+      input.value = "";
+      input.placeholder = info.name;
+    } else {
+      input.value = info.name;
+      input.placeholder = "";
     }
+    nameTd.appendChild(input);
     tr.appendChild(nameTd);
-  }
-  if (hasNameFallback) {
-    tr.classList.add("has-name-fallback");
   }
 
   return tr;
@@ -51,17 +73,17 @@ function render() {
     .sort((a, b) => a - b)
     .map((id) => ({ id, code: CHECK_ID_MAP[id] }));
 
-  const nameFallbackCounts = Object.fromEntries(AUDIT_LANGS.map((lang) => [lang, 0]));
+  const nameFallbackCounts = Object.fromEntries(AUDIT_LANGS.map(({ lang }) => [lang, 0]));
   for (const entry of entries) {
-    for (const lang of AUDIT_LANGS) {
+    for (const { lang } of AUDIT_LANGS) {
       if (getCheckNameInfo(entry.id, lang).isFallback) {
         nameFallbackCounts[lang]++;
       }
     }
   }
 
-  const fallbackSummary = AUDIT_LANGS.map((lang) => `${lang}: ${nameFallbackCounts[lang]}/${entries.length}`).join(", ");
-  statsEl.textContent = `${entries.length} entries total. Names not yet authored -- ${fallbackSummary}.`;
+  const fallbackSummary = AUDIT_LANGS.map(({ lang }) => `${lang}: ${nameFallbackCounts[lang]}/${entries.length}`).join(", ");
+  statsEl.textContent = `${entries.length} entries total (${EVENT_CHECK_IDS.size} events, ${entries.length - EVENT_CHECK_IDS.size} locations). Names not yet authored -- ${fallbackSummary}.`;
 
   const frag = document.createDocumentFragment();
   for (const entry of entries) {
@@ -79,8 +101,60 @@ function applyFilter() {
   }
 }
 
+// Builds the check_names_XX.js source text for one language from whatever's
+// currently typed into that column's inputs -- blank inputs (still showing
+// their fallback placeholder) are simply omitted, same as an un-authored id
+// in the file today. Ids are emitted in ascending order for a clean diff.
+function buildExportSource({ lang, varName, fileName }) {
+  const inputs = document.querySelectorAll(`input.name-input[data-lang="${lang}"]`);
+  const entries = [];
+  for (const input of inputs) {
+    const value = input.value.trim();
+    if (value) {
+      entries.push([Number(input.dataset.id), value]);
+    }
+  }
+  entries.sort((a, b) => a[0] - b[0]);
+
+  let out = `// Check-completion names (${lang}), keyed by the same global id\n`;
+  out += `// CHECK_ID_MAP uses. Exported from pages/tracker/check_audit.html.\n`;
+  out += `const ${varName} = {\n`;
+  for (const [id, name] of entries) {
+    out += `  ${id}: ${JSON.stringify(name)},\n`;
+  }
+  out += `};\n`;
+  return { fileName, source: out };
+}
+
+function downloadText(fileName, text) {
+  const blob = new Blob([text], { type: "text/javascript" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setupExportButtons() {
+  const container = document.getElementById("exportButtons");
+  for (const langConfig of AUDIT_LANGS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `Export ${langConfig.label} (${langConfig.fileName})`;
+    button.addEventListener("click", () => {
+      const { fileName, source } = buildExportSource(langConfig);
+      downloadText(fileName, source);
+    });
+    container.appendChild(button);
+  }
+}
+
 function init() {
   render();
+  setupExportButtons();
   document.getElementById("filterInput").addEventListener("input", applyFilter);
 }
 

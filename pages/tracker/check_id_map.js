@@ -73,4 +73,38 @@ const CHECK_ID_MAP = {
   752: "3ChOPClear", 753: "3ChEHClear", 754: "3ChFBClear", 755: "3ChGBClear", 756: "3ChASClear", 757: "3ChENClear",
   758: "3ChSSClear", 759: "3ChSMClear", 760: "3ChSTClear", 761: "3ChVAClear",
   762: "3ChS1Clear1", 763: "3ChS2Clear1", 764: "3ChS3Clear", 765: "3ChS1Clear2", 766: "3ChS2Clear2",
+
+  // Synthetic ids (900+), NOT part of the ported AutoTracker map (which tops
+  // out at 766) -- ref/aaa/boot.lua's own "whole game beaten" flag (WRAM
+  // 0x7FFFCF, kept per-title in sessionSave.titleValue the same way
+  // checks/checksSeen are) isn't a real bit in the 96-byte checks array at
+  // all, so it can't get a real id. lua/share_info.lua's
+  // checkForNewGameClear() reports it through the same `checks` event field
+  // as real checks using these 3 ids, purely so it reuses the existing
+  // check-name translation files and event-feed display with no new schema.
+  900: "GameClearX1", 901: "GameClearX2", 902: "GameClearX3",
+  // "All 3 titles cleared" -- ref/aaa/boot.lua's own allClear/"All Clear
+  // Time" milestone. Carries a companion event.gameClearTime string
+  // (H:MM:SS, from lua/share_logic.lua's ShareLogic.formatClearTime) that
+  // event_feed.js substitutes into this id's name wherever "{time}" appears
+  // -- see check_names_en.js etc.
+  903: "GameClearAll",
 };
+
+// Which global check ids are "events" (stage clear / boss defeat) rather
+// than plain randomized-item pickup "locations". Only event ids are ever
+// reported to the event feed (see lua/share_info.lua's checkForNewChecks());
+// locations aren't synced or announced at all -- after randomization they
+// hold a different item, so their completion is just item ownership,
+// already covered by the items merge. Mirrored 1:1 in
+// lua/share_logic.lua's own EVENT_CHECK_IDS -- keep both in sync if this
+// ever needs revisiting. Used by pages/tracker/check_audit.html to flag which
+// rows are events when authoring names.
+const EVENT_CHECK_IDS = new Set([
+  240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251,
+  493, 494, 495,
+  496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508,
+  750, 751,
+  752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766,
+  900, 901, 902, 903,
+]);
