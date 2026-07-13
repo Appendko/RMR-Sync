@@ -11,6 +11,64 @@ let keepAlivePcs = null; // holds the two RTCPeerConnections so they aren't GC'd
 const PROGRESS_WORKER_URL_KEY = "rmrSyncRelayWorkerUrl";
 const PROGRESS_ROOM_KEY_KEY = "rmrSyncRelayRoomKey";
 
+let progressWs = null;
+let progressReconnectDelayMs = 1000;
+const PROGRESS_MAX_RECONNECT_DELAY_MS = 15000;
+let teamChecks = [];
+let mergedItems = new Array(96).fill(0);
+let totalDeaths = 0;
+let totalIfgUses = 0;
+
+function toProgressWebSocketUrl(workerUrl, room) {
+  const httpUrl = new URL(`/room/${encodeURIComponent(room)}/ws`, workerUrl);
+  httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:";
+  return httpUrl.toString();
+}
+
+// Implemented for real in a later task (grid rendering) -- a no-op for now
+// so this task's WS wiring can be verified independently.
+function renderProgressGrid() {
+  // placeholder -- see Task 11
+}
+
+function applyProgressState(msg) {
+  if (msg.teamChecks !== undefined) teamChecks = msg.teamChecks;
+  if (msg.mergedItems !== undefined) mergedItems = msg.mergedItems;
+  if (msg.totalDeaths !== undefined) totalDeaths = msg.totalDeaths;
+  if (msg.totalIfgUses !== undefined) totalIfgUses = msg.totalIfgUses;
+  renderProgressGrid();
+}
+
+// Connects (or reconnects) to the room's WebSocket purely for team-progress
+// display -- entirely independent of the outbox/inbox file relay above (see
+// design spec decision 8: nothing from this connection is ever written to
+// the inbox file Lua reads).
+function connectProgressWs() {
+  const workerUrl = getProgressWorkerUrl();
+  const roomKey = getProgressRoomKey();
+  if (!workerUrl || !roomKey) {
+    return;
+  }
+  if (progressWs) {
+    progressWs.close();
+  }
+  progressWs = new WebSocket(toProgressWebSocketUrl(workerUrl, roomKey));
+
+  progressWs.addEventListener("open", () => {
+    progressReconnectDelayMs = 1000;
+  });
+  progressWs.addEventListener("close", () => {
+    setTimeout(connectProgressWs, progressReconnectDelayMs);
+    progressReconnectDelayMs = Math.min(progressReconnectDelayMs * 2, PROGRESS_MAX_RECONNECT_DELAY_MS);
+  });
+  progressWs.addEventListener("message", (message) => {
+    const data = JSON.parse(message.data);
+    if (data.type === "init" || data.type === "progress") {
+      applyProgressState(data);
+    }
+  });
+}
+
 function getProgressWorkerUrl() {
   return document.getElementById("progressWorkerUrl").value.trim();
 }
@@ -54,6 +112,9 @@ function maybeAutoFillProgressFields(req) {
     roomKeyInput.value = req.roomKey;
     persistProgressSetting(PROGRESS_ROOM_KEY_KEY, req.roomKey);
     changed = true;
+  }
+  if (changed) {
+    connectProgressWs();
   }
   return changed;
 }
@@ -242,7 +303,10 @@ reconnectBtn.addEventListener("click", async () => {
 
 document.getElementById("progressWorkerUrl").addEventListener("input", (e) => persistProgressSetting(PROGRESS_WORKER_URL_KEY, e.target.value.trim()));
 document.getElementById("progressRoomKey").addEventListener("input", (e) => persistProgressSetting(PROGRESS_ROOM_KEY_KEY, e.target.value.trim()));
+document.getElementById("progressWorkerUrl").addEventListener("change", connectProgressWs);
+document.getElementById("progressRoomKey").addEventListener("change", connectProgressWs);
 restoreProgressSettings();
+connectProgressWs();
 
 (async () => {
   const restored = await restoreFolder();
