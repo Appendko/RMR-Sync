@@ -253,7 +253,7 @@ not reusing `CHECK_ID_MAP` since these aren't check ids):
 // en
 const MISC_EVENT_NAMES_EN = {
   death: "{name} met an unfortunate end, exploding into bubbles. Your deeds of valor will be remembered.",
-  ifgUsed: "{name} secretly used IFG. They weren't like this before — must be a bad influence.",
+  ifgUsed: "{name} secretly used IFG. They weren't like this before... who led them astray?",
 };
 ```
 
