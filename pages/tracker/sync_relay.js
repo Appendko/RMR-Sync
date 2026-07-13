@@ -52,17 +52,31 @@ function connectProgressWs() {
   if (progressWs) {
     progressWs.close();
   }
-  progressWs = new WebSocket(toProgressWebSocketUrl(workerUrl, roomKey));
+  const ws = new WebSocket(toProgressWebSocketUrl(workerUrl, roomKey));
+  progressWs = ws;
 
-  progressWs.addEventListener("open", () => {
+  ws.addEventListener("open", () => {
+    if (progressWs !== ws) return; // superseded before it even opened
     progressReconnectDelayMs = 1000;
   });
-  progressWs.addEventListener("close", () => {
+  ws.addEventListener("close", () => {
+    // A close event on a socket that's no longer the current progressWs means
+    // this socket was deliberately superseded by a newer connectProgressWs()
+    // call (e.g. the user edited the Worker URL/room key), not a real
+    // disconnect -- reconnecting here would fight the new connection and
+    // cause a perpetual reconnect-thrash loop.
+    if (progressWs !== ws) return;
     setTimeout(connectProgressWs, progressReconnectDelayMs);
     progressReconnectDelayMs = Math.min(progressReconnectDelayMs * 2, PROGRESS_MAX_RECONNECT_DELAY_MS);
   });
-  progressWs.addEventListener("message", (message) => {
-    const data = JSON.parse(message.data);
+  ws.addEventListener("message", (message) => {
+    if (progressWs !== ws) return;
+    let data;
+    try {
+      data = JSON.parse(message.data);
+    } catch {
+      return; // malformed message -- ignore rather than throw
+    }
     if (data.type === "init" || data.type === "progress") {
       applyProgressState(data);
     }
