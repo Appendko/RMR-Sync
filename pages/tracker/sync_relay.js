@@ -8,6 +8,56 @@ let lastSeq = -1;
 let pollHandle = null;
 let keepAlivePcs = null; // holds the two RTCPeerConnections so they aren't GC'd
 
+const PROGRESS_WORKER_URL_KEY = "rmrSyncRelayWorkerUrl";
+const PROGRESS_ROOM_KEY_KEY = "rmrSyncRelayRoomKey";
+
+function getProgressWorkerUrl() {
+  return document.getElementById("progressWorkerUrl").value.trim();
+}
+function getProgressRoomKey() {
+  return document.getElementById("progressRoomKey").value.trim();
+}
+
+function persistProgressSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // not fatal -- this session just won't be remembered next time
+  }
+}
+
+function restoreProgressSettings() {
+  try {
+    const workerUrl = localStorage.getItem(PROGRESS_WORKER_URL_KEY);
+    const roomKey = localStorage.getItem(PROGRESS_ROOM_KEY_KEY);
+    if (workerUrl) document.getElementById("progressWorkerUrl").value = workerUrl;
+    if (roomKey) document.getElementById("progressRoomKey").value = roomKey;
+  } catch {
+    // localStorage unavailable -- just start blank
+  }
+}
+
+// Auto-fills the two progress fields from a successfully-read outbox
+// request, but only if empty -- so connecting a game folder doesn't
+// overwrite a room key the user deliberately typed in to spectate a
+// different room (see design spec decision 7).
+function maybeAutoFillProgressFields(req) {
+  const workerUrlInput = document.getElementById("progressWorkerUrl");
+  const roomKeyInput = document.getElementById("progressRoomKey");
+  let changed = false;
+  if (!workerUrlInput.value.trim() && req.workerUrl) {
+    workerUrlInput.value = req.workerUrl;
+    persistProgressSetting(PROGRESS_WORKER_URL_KEY, req.workerUrl);
+    changed = true;
+  }
+  if (!roomKeyInput.value.trim() && req.roomKey) {
+    roomKeyInput.value = req.roomKey;
+    persistProgressSetting(PROGRESS_ROOM_KEY_KEY, req.roomKey);
+    changed = true;
+  }
+  return changed;
+}
+
 function log(text) {
   statusEl.textContent = text;
 }
@@ -70,6 +120,8 @@ async function tick() {
   } catch {
     return; // no outbox yet, or a torn read -- try again next tick
   }
+
+  maybeAutoFillProgressFields(req);
 
   if (req.session !== lastSession) {
     lastSession = req.session;
@@ -187,6 +239,10 @@ reconnectBtn.addEventListener("click", async () => {
     log("Permission not granted.");
   }
 });
+
+document.getElementById("progressWorkerUrl").addEventListener("input", (e) => persistProgressSetting(PROGRESS_WORKER_URL_KEY, e.target.value.trim()));
+document.getElementById("progressRoomKey").addEventListener("input", (e) => persistProgressSetting(PROGRESS_ROOM_KEY_KEY, e.target.value.trim()));
+restoreProgressSettings();
 
 (async () => {
   const restored = await restoreFolder();
