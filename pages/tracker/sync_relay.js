@@ -96,17 +96,25 @@ async function tick() {
       resp.sync = syncData;
       resp.ok = true;
       for (const ev of req.events || []) {
-        // JSON.stringify drops undefined keys, so this is correct whether ev
-        // carries items, checks, both, or checks+gameClearTime (the
-        // synthetic game-clear/all-clear ids) -- forwarding only `items`
-        // here silently dropped every checks-only event server-side (400:
-        // "must include at least one of items or checks"), with no visible
-        // error since only the top-level /sync error surfaces in the status
-        // line below.
+        // Every field ev might carry is enumerated explicitly here --
+        // JSON.stringify drops undefined keys, so this is correct whether
+        // ev carries any subset of these. This exact spot has already
+        // silently dropped a real field twice (checks, then
+        // gameClearTime) because a new Lua-side field was added without
+        // updating this list -- if you're adding a new field to the event
+        // shape in lua/share_info.lua, it MUST be added here too.
         const evResp = await fetch(`${room}/event`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ player: req.player, game: ev.game, items: ev.items, checks: ev.checks, gameClearTime: ev.gameClearTime }),
+          body: JSON.stringify({
+            player: req.player,
+            game: ev.game,
+            items: ev.items,
+            checks: ev.checks,
+            gameClearTime: ev.gameClearTime,
+            deathDelta: ev.deathDelta,
+            ifgDelta: ev.ifgDelta,
+          }),
         });
         if (evResp.ok) resp.eventsPosted++;
       }
