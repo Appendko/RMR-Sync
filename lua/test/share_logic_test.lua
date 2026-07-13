@@ -52,6 +52,15 @@ assertEqual(ShareLogic.formatClearTime(3600), "0:01:00", "formatClearTime exactl
 assertEqual(ShareLogic.formatClearTime(216000), "1:00:00", "formatClearTime exactly one hour")
 assertEqual(ShareLogic.formatClearTime(302160), "1:23:56", "formatClearTime H:MM:SS composite (1h23m56s * 60 frames/sec)")
 
+-- positiveDelta: reports the increase only when there's a prior baseline
+-- and the value actually went up (deaths/IFG-use counters are monotonic
+-- during a session)
+assertEqual(ShareLogic.positiveDelta(nil, 5), nil, "positiveDelta no baseline yet")
+assertEqual(ShareLogic.positiveDelta(5, 5), nil, "positiveDelta unchanged")
+assertEqual(ShareLogic.positiveDelta(5, 3), nil, "positiveDelta decreased")
+assertEqual(ShareLogic.positiveDelta(5, 7), 2, "positiveDelta increased")
+assertEqual(ShareLogic.positiveDelta(0, 1), 1, "positiveDelta from a real zero baseline")
+
 -- isEventCheckId: stage-clear and boss-defeat ids are events, plain pickup
 -- locations are not
 assertEqual(ShareLogic.isEventCheckId(240), true, "isEventCheckId X1 opening stage clear")
