@@ -8,11 +8,43 @@ const MAX_EVENTS = 200;
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
 const DUPLICATE_EVENT_WINDOW_MS = 15000;
 
+// Item ids that must NEVER be granted to a player via cross-player merge,
+// even in "checksSeen+items" (share everything) mode -- unlike every other
+// item, owning this one has a permanent, one-way side effect in-game: X3's
+// own logic hides the Vava-stage teleporter from the map the moment this
+// key is owned. A player who receives it via merge before they've actually
+// reached that point in their own playthrough would have the teleporter
+// vanish without ever having used it, permanently locking them out of that
+// stage on their own save -- there's no way to make it reappear. checksSeen+
+// shared mode already excludes this for a different reason (it isn't one of
+// shareCategoryFor's 7 whitelisted categories at all), so this only needs
+// to be enforced in the unconditional checksSeen+items path below.
+const NEVER_MERGE_ITEM_IDS = [572]; // 3ItKeyVavaStage (pages/tracker/item_id_map.js)
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// Unconditionally clears each excluded id's bit in the room's stored
+// mergedItems, regardless of whether stored or incoming had it set. This is
+// safe for the legitimate owner too: mergedItems exists purely to propagate
+// an item to OTHER players (lua/share_info.lua's writeMergedItems only ever
+// ORs these bits into a player's own RAM, never clears any) -- a player who
+// genuinely owns this item locally keeps it regardless of what the room's
+// mergedItems says, since their own RAM was never driven by mergedItems in
+// the first place. Suppressing it here only ever prevents it from being
+// granted to someone who doesn't already have it.
+function withNeverMergeIdsSuppressed(merged, excludedIds) {
+  const result = merged.slice();
+  for (const id of excludedIds) {
+    const byteIndex = Math.floor(id / 8);
+    const mask = 1 << (id % 8);
+    result[byteIndex] &= ~mask & 0xff;
+  }
+  return result;
 }
 
 // Cross-PLAYER, same-byte-position OR-merge of one client's full 96-byte
@@ -24,8 +56,9 @@ function jsonResponse(data, status = 200) {
 // mode.
 function mergeIncomingItems(stored, incoming, mode, shareFlags) {
   if (mode === "checksSeen+items") {
-    // No category filter at all -- the entire array OR-merges unconditionally.
-    return orMergeBytes(stored, incoming);
+    // No category filter at all -- the entire array OR-merges unconditionally,
+    // except for NEVER_MERGE_ITEM_IDS (see comment above).
+    return withNeverMergeIdsSuppressed(orMergeBytes(stored, incoming), NEVER_MERGE_ITEM_IDS);
   }
   if (mode !== "checksSeen+shared") {
     // Plain "checksSeen" mode: items sharing isn't enabled for this room --

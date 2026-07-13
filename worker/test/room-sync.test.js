@@ -170,6 +170,34 @@ describe("RoomDO /sync", () => {
     expect(mergedItems[5]).toBe(0x01);
   });
 
+  it("never merges id 572 (3ItKeyVavaStage) even in checksSeen+items mode -- owning it permanently hides the Vava-stage teleporter", async () => {
+    const stub = getStub("test-room-sync-vava-key-1");
+    await initRoom(stub, "checksSeen+items");
+
+    const incoming = new Array(96).fill(0);
+    incoming[71] = 0x10 | 0x20; // id 572 (3ItKeyVavaStage, must never merge) + id 573 (3ItKeyVajurila, must merge normally)
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, incoming);
+
+    const { mergedItems } = await res.json();
+    expect(mergedItems[71] & 0x10).toBe(0); // id 572 suppressed
+    expect(mergedItems[71] & 0x20).toBe(0x20); // id 573 unaffected, merges normally
+  });
+
+  it("suppresses id 572 room-wide even after a different player's snapshot already set it (no way back in once excluded)", async () => {
+    const stub = getStub("test-room-sync-vava-key-2");
+    await initRoom(stub, "checksSeen+items");
+
+    const first = new Array(96).fill(0);
+    first[71] = 0x10; // id 572
+    await sync(stub, new Array(96).fill(0), 0, undefined, first);
+
+    const second = new Array(96).fill(0); // a later, unrelated sync from another player
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, second);
+
+    const { mergedItems } = await res.json();
+    expect(mergedItems[71] & 0x10).toBe(0);
+  });
+
   it("checksSeen+shared mode only merges whitelisted-category bits from the incoming items array", async () => {
     const stub = getStub("test-room-sync-14");
     await initRoom(stub, "checksSeen+shared");
