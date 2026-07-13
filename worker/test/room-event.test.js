@@ -316,7 +316,7 @@ describe("RoomDO /event -- death/IFG deltas accumulate into persistent totals", 
     await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true })); // discard init
 
     const messages = [];
-    ws.addEventListener("message", (e) => messages.push(JSON.parse(e.data)));
+    ws.addEventListener("message", (e) => { messages.push(JSON.parse(e.data)); });
     await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
     await new Promise((resolve) => setTimeout(resolve, 10));
 
