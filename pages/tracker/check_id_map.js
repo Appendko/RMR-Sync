@@ -69,6 +69,17 @@ const CHECK_ID_MAP = {
   672: "3ChS1LifeL_P", 673: "3ChS1EnergyL", 674: "3ChS1LifeL_LR", 675: "3ChS1HyperChip",
   688: "3ChS2Saber",
   704: "3ChS31UP", 705: "3ChS3LifeL",
+  // Not part of the original ported AutoTracker map -- confirmed live (seen
+  // as id 736 in an actual checks diff capture) and cross-referenced against
+  // the randomizer's own C# source (hAppendVavaStageKeyIntoCheckSequence
+  // appends check 0x3E0, only when enableSpoiler is on; 0x3E0 is 1-indexed
+  // by title in the C#'s own numbering, translating to this project's
+  // 0-indexed CHECK_ID_MAP as (3-1)*256 + (0x3E0 & 0xFF) = 736). Named to
+  // mirror its corresponding item's own code (3ItKeyVavaStage, id 572) --
+  // not reported to the event feed (no display-name translation), only used
+  // by lua/share_info.lua as the local write-back target once item 572 is
+  // owned (see checkForVavaStageKeyOwned).
+  736: "3ChKeyVavaStage",
   750: "3ChVajurilaFF", 751: "3ChMandarelaBB",
   752: "3ChOPClear", 753: "3ChEHClear", 754: "3ChFBClear", 755: "3ChGBClear", 756: "3ChASClear", 757: "3ChENClear",
   758: "3ChSSClear", 759: "3ChSMClear", 760: "3ChSTClear", 761: "3ChVAClear",
