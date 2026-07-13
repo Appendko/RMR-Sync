@@ -25,10 +25,117 @@ function toProgressWebSocketUrl(workerUrl, room) {
   return httpUrl.toString();
 }
 
-// Implemented for real in a later task (grid rendering) -- a no-op for now
-// so this task's WS wiring can be verified independently.
+function isTeamCheckDone(checkId) {
+  return teamChecks.includes(checkId);
+}
+
+function isItemOwned(itemId) {
+  const byteIndex = Math.floor(itemId / 8);
+  const mask = 1 << (itemId % 8);
+  return (mergedItems[byteIndex] & mask) !== 0;
+}
+
+// Either the Part or Chip variant of an armor slot counts as "owned" --
+// whichever one the randomizer actually placed at that check.
+function isArmorSlotOwned(idPair) {
+  return idPair.some((id) => isItemOwned(id));
+}
+
+function makeGridIcon(file, label, done) {
+  const img = document.createElement("img");
+  img.src = file;
+  img.alt = label;
+  img.title = label;
+  if (done) {
+    img.classList.add("done");
+  }
+  return img;
+}
+
 function renderProgressGrid() {
-  // placeholder -- see Task 11
+  const panel = document.getElementById("progressPanel");
+  panel.innerHTML = "";
+
+  for (const title of [1, 2, 3]) {
+    const layout = TEAM_PROGRESS_LAYOUT[title];
+    const section = document.createElement("div");
+    section.className = "title-panel";
+
+    const heading = document.createElement("h3");
+    const titleIcon = document.createElement("img");
+    titleIcon.src = layout.titleIcon;
+    titleIcon.alt = `X${title}`;
+    heading.appendChild(titleIcon);
+    heading.appendChild(document.createTextNode(`Rockman X${title}`));
+    section.appendChild(heading);
+
+    const bossRow = document.createElement("div");
+    bossRow.className = "icon-row";
+    const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
+    bossRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
+    for (const checkId of layout.bossCheckIds) {
+      const info = getCheckIconInfoForId(checkId);
+      bossRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+    }
+    section.appendChild(bossRow);
+
+    const weaponRow = document.createElement("div");
+    weaponRow.className = "icon-row";
+    for (const itemId of layout.weaponIds) {
+      const info = getIconInfoForId(itemId);
+      weaponRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+    }
+    const superInfo = getIconInfoForId(layout.superWeaponId);
+    weaponRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
+    section.appendChild(weaponRow);
+
+    const armorRow = document.createElement("div");
+    armorRow.className = "icon-row";
+    for (const idPair of layout.armor) {
+      const info = getIconInfoForId(idPair[0]);
+      armorRow.appendChild(makeGridIcon(info.file, info.label, isArmorSlotOwned(idPair)));
+    }
+    for (const itemId of layout.subtankIds) {
+      const info = getIconInfoForId(itemId);
+      armorRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+    }
+    section.appendChild(armorRow);
+
+    const sigmaRow = document.createElement("div");
+    sigmaRow.className = "icon-row";
+    for (const checkId of layout.sigmaCheckIds) {
+      const info = getCheckIconInfoForId(checkId);
+      sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+    }
+    const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
+    sigmaRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
+    section.appendChild(sigmaRow);
+
+    panel.appendChild(section);
+  }
+
+  const miscRow = document.createElement("div");
+  miscRow.className = "misc-row";
+  const allClearInfo = getCheckIconInfoForId(ALL_CLEAR_CHECK_ID);
+  miscRow.appendChild(makeGridIcon(allClearInfo.file, allClearInfo.label, isTeamCheckDone(ALL_CLEAR_CHECK_ID)));
+
+  const deathsIcon = document.createElement("img");
+  deathsIcon.src = "assets/deaths.png";
+  deathsIcon.alt = "Deaths";
+  miscRow.appendChild(deathsIcon);
+  const deathsCount = document.createElement("span");
+  deathsCount.textContent = String(totalDeaths);
+  miscRow.appendChild(deathsCount);
+
+  const ifgIcon = document.createElement("img");
+  ifgIcon.src = "assets/igf.png";
+  ifgIcon.alt = "IFG uses";
+  miscRow.appendChild(ifgIcon);
+  const ifgCount = document.createElement("span");
+  ifgCount.textContent = String(totalIfgUses);
+  miscRow.appendChild(ifgCount);
+
+  panel.appendChild(miscRow);
 }
 
 function applyProgressState(msg) {
