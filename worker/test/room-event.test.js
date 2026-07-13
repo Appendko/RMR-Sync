@@ -246,3 +246,82 @@ describe("RoomDO /event -- duplicate-window keys namespaced by kind", () => {
     expect(status.eventCount).toBe(1);
   });
 });
+
+describe("RoomDO /event -- death/IFG deltas accumulate into persistent totals", () => {
+  it("accepts a deathDelta-only event and adds it to totalDeaths", async () => {
+    const stub = getStub("test-room-progress-death-1");
+    await initRoom(stub, "checksSeen");
+    const res = await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
+    expect(res.status).toBe(200);
+
+    const backlog = await getBacklog(stub);
+    expect(backlog[0].deathDelta).toBe(1);
+  });
+
+  it("accepts an ifgDelta-only event and adds it to totalIfgUses", async () => {
+    const stub = getStub("test-room-progress-ifg-1");
+    await initRoom(stub, "checksSeen");
+    const res = await postEvent(stub, { player: "a", game: 1, ifgDelta: 2 });
+    expect(res.status).toBe(200);
+
+    const backlog = await getBacklog(stub);
+    expect(backlog[0].ifgDelta).toBe(2);
+  });
+
+  it("sums multiple deathDelta reports across players into one running total, visible via WS init", async () => {
+    const stub = getStub("test-room-progress-death-2");
+    await initRoom(stub, "checksSeen");
+    await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
+    await postEvent(stub, { player: "b", game: 2, deathDelta: 3 });
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true }));
+    expect(initMsg.totalDeaths).toBe(4);
+    ws.close();
+  });
+
+  it("does not dedupe repeated deathDelta reports from the same player within the 15s window (unlike checks/items)", async () => {
+    const stub = getStub("test-room-progress-death-3");
+    await initRoom(stub, "checksSeen");
+    await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
+    await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
+
+    const status = await (await stub.fetch("https://do/admin/status")).json();
+    expect(status.eventCount).toBe(2); // both logged, neither treated as a duplicate
+  });
+
+  it("OR-merges newly-completed check ids into the persistent teamChecks list", async () => {
+    const stub = getStub("test-room-progress-checks-1");
+    await initRoom(stub, "checksSeen");
+    await postEvent(stub, { player: "a", game: 1, checks: [245] });
+    await postEvent(stub, { player: "b", game: 1, checks: [245, 900] });
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true }));
+    expect(initMsg.teamChecks.sort((x, y) => x - y)).toEqual([245, 900]); // 245 only counted once
+    ws.close();
+  });
+
+  it("broadcasts a progress message alongside the event message when a check/delta lands", async () => {
+    const stub = getStub("test-room-progress-broadcast-1");
+    await initRoom(stub, "checksSeen");
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true })); // discard init
+
+    const messages = [];
+    ws.addEventListener("message", (e) => messages.push(JSON.parse(e.data)));
+    await postEvent(stub, { player: "a", game: 1, deathDelta: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(messages.some((m) => m.type === "event")).toBe(true);
+    expect(messages.some((m) => m.type === "progress" && m.totalDeaths === 1)).toBe(true);
+    ws.close();
+  });
+});
