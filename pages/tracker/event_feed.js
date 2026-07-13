@@ -23,6 +23,13 @@ function friendlyModeLabel(mode) {
   return mode ? (MODE_LABELS[mode] ?? mode) : "not created yet";
 }
 
+const MISC_EVENT_NAME_TABLES = { en: MISC_EVENT_NAMES_EN, ja: MISC_EVENT_NAMES_JA, "zh-TW": MISC_EVENT_NAMES_ZHTW };
+function getMiscEventName(kind, lang, playerName) {
+  const table = MISC_EVENT_NAME_TABLES[lang] || MISC_EVENT_NAMES_EN;
+  const template = table[kind] || MISC_EVENT_NAMES_EN[kind];
+  return template.replace("{name}", playerName);
+}
+
 // Resolves a setting that can come from either a URL query param or the
 // settings panel (saved to localStorage). localStorage wins whenever it has
 // *any* value (including an explicitly-cleared empty string) -- the query
@@ -220,7 +227,9 @@ function renderEntry(event, showText, lang, shareFlags, showItems, showChecks) {
   // the showItems/showChecks settings-panel checkboxes).
   const realItems = showItems ? (event.items || []).filter((itemId) => ITEM_ID_MAP[itemId] !== undefined) : [];
   const realChecks = showChecks ? (event.checks || []).filter((checkId) => CHECK_ID_MAP[checkId] !== undefined) : [];
-  if (realItems.length === 0 && realChecks.length === 0) {
+  const hasDeath = event.deathDelta !== undefined;
+  const hasIfg = event.ifgDelta !== undefined;
+  if (realItems.length === 0 && realChecks.length === 0 && !hasDeath && !hasIfg) {
     return null;
   }
 
@@ -303,6 +312,27 @@ function renderEntry(event, showText, lang, shareFlags, showItems, showChecks) {
       item.appendChild(text);
     }
     entry.appendChild(item);
+  }
+
+  // A deathDelta/ifgDelta greater than 1 (multiple increments between polls)
+  // renders the same flavor line once per unit of delta -- matching how a
+  // multi-id checks/items batch already renders one line per id, not a
+  // single "x3" summary (see design spec decision 6).
+  if (hasDeath) {
+    for (let i = 0; i < event.deathDelta; i++) {
+      const line = document.createElement("span");
+      line.className = "item misc-event-item";
+      line.textContent = getMiscEventName("death", lang, event.player);
+      entry.appendChild(line);
+    }
+  }
+  if (hasIfg) {
+    for (let i = 0; i < event.ifgDelta; i++) {
+      const line = document.createElement("span");
+      line.className = "item misc-event-item";
+      line.textContent = getMiscEventName("ifgUsed", lang, event.player);
+      entry.appendChild(line);
+    }
   }
 
   return entry;
