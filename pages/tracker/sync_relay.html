@@ -7,6 +7,14 @@
   body { font-family: sans-serif; max-width: 640px; margin: 2em auto; }
   #status { white-space: pre-wrap; background: #f0f0f0; padding: 1em; border-radius: 4px; }
   button { font-size: 1em; padding: 0.5em 1em; margin-right: 0.5em; }
+  .title-panel { margin: 0.75em 0; border: 1px solid #ccc; border-radius: 6px; padding: 0.6em 0.8em; }
+  .title-panel h3 { display: flex; align-items: center; gap: 0.4em; font-size: 1.05em; margin: 0 0 0.5em; }
+  .title-panel h3 img { width: 24px; height: 24px; }
+  .icon-row { display: flex; flex-wrap: wrap; gap: 0.25em; margin-bottom: 0.35em; }
+  .icon-row img { width: 28px; height: 28px; image-rendering: pixelated; filter: grayscale(100%) brightness(0.55); opacity: 0.45; }
+  .icon-row img.done { filter: none; opacity: 1; }
+  .misc-row { display: flex; align-items: center; gap: 1.5em; margin-top: 0.5em; font-size: 1.05em; }
+  .misc-row img { width: 24px; height: 24px; image-rendering: pixelated; }
 </style>
 </head>
 <body>
@@ -17,9 +25,32 @@
   picking the folder that contains <code>boot.lua</code> once.
   Requires Chrome, Edge, or another Chromium-based browser.
 </p>
+
+<h2>Team progress</h2>
+<p>
+  Enter a Worker URL and room key to see the team's progress below — this
+  works even without connecting a game folder. If you connect a folder
+  below, these fill in automatically from your own game's settings.
+</p>
+<label>Worker URL<br><input type="text" id="progressWorkerUrl" style="width:100%" autocomplete="off" /></label><br><br>
+<label>Room key<br><input type="text" id="progressRoomKey" style="width:100%" autocomplete="off" /></label>
+<div id="progressPanel"></div>
+
+<h2>Game connection</h2>
 <button id="pickBtn">Choose game folder</button>
 <button id="reconnectBtn" style="display:none">Reconnect folder</button>
 <div id="status">Not connected.</div>
+<script src="item_id_map.js"></script>
+<script src="item_names_en.js"></script>
+<script src="item_names_ja.js"></script>
+<script src="item_names_zhtw.js"></script>
+<script src="icon_map.js"></script>
+<script src="check_id_map.js"></script>
+<script src="check_names_en.js"></script>
+<script src="check_names_ja.js"></script>
+<script src="check_names_zhtw.js"></script>
+<script src="check_lookup.js"></script>
+<script src="team_progress_layout.js"></script>
 <script src="sync_relay.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags, isValidGameClearTime } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags, isValidGameClearTime, isValidDeathDelta, isValidIfgDelta } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the three known modes", () => {
@@ -83,7 +83,7 @@ describe("validateEventBody", () => {
   });
 
   it("rejects a body with neither items nor checks", () => {
-    expect(validateEventBody({ player: "ds83171", game: 2 })).toMatch(/items or checks/);
+    expect(validateEventBody({ player: "ds83171", game: 2 })).toMatch(/items, checks, deathDelta, or ifgDelta/);
   });
 
   it("rejects a missing or empty player name", () => {
@@ -148,6 +148,16 @@ describe("validateEventBody", () => {
     expect(validateEventBody({ player: "a", game: 1, checks: [903], gameClearTime: "1:2:03" })).toMatch(/gameClearTime/);
   });
 
+  it("accepts a body with only a deathDelta or only an ifgDelta", () => {
+    expect(validateEventBody({ player: "a", game: 1, deathDelta: 1 })).toBeNull();
+    expect(validateEventBody({ player: "a", game: 1, ifgDelta: 3 })).toBeNull();
+  });
+
+  it("rejects an out-of-range deathDelta or ifgDelta", () => {
+    expect(validateEventBody({ player: "a", game: 1, deathDelta: 0 })).toMatch(/deathDelta/);
+    expect(validateEventBody({ player: "a", game: 1, ifgDelta: 51 })).toMatch(/ifgDelta/);
+  });
+
   it("rejects a non-object body", () => {
     expect(validateEventBody(null)).toMatch(/object/);
     expect(validateEventBody("nope")).toMatch(/object/);
@@ -167,6 +177,37 @@ describe("isValidGameClearTime", () => {
     expect(isValidGameClearTime("abc")).toBe(false);
     expect(isValidGameClearTime(123)).toBe(false);
     expect(isValidGameClearTime(null)).toBe(false);
+  });
+});
+
+describe("isValidDeathDelta", () => {
+  it("accepts undefined and integers from 1 to 50", () => {
+    expect(isValidDeathDelta(undefined)).toBe(true);
+    expect(isValidDeathDelta(1)).toBe(true);
+    expect(isValidDeathDelta(50)).toBe(true);
+  });
+
+  it("rejects zero, negative, non-integer, over-50, and non-number values", () => {
+    expect(isValidDeathDelta(0)).toBe(false);
+    expect(isValidDeathDelta(-1)).toBe(false);
+    expect(isValidDeathDelta(1.5)).toBe(false);
+    expect(isValidDeathDelta(51)).toBe(false);
+    expect(isValidDeathDelta("1")).toBe(false);
+    expect(isValidDeathDelta(null)).toBe(false);
+  });
+});
+
+describe("isValidIfgDelta", () => {
+  it("accepts undefined and integers from 1 to 50", () => {
+    expect(isValidIfgDelta(undefined)).toBe(true);
+    expect(isValidIfgDelta(1)).toBe(true);
+    expect(isValidIfgDelta(50)).toBe(true);
+  });
+
+  it("rejects zero, negative, non-integer, and over-50 values", () => {
+    expect(isValidIfgDelta(0)).toBe(false);
+    expect(isValidIfgDelta(-1)).toBe(false);
+    expect(isValidIfgDelta(51)).toBe(false);
   });
 });
 

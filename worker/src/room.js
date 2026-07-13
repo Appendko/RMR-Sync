@@ -61,6 +61,19 @@ function mergeIncomingItems(stored, incoming, mode, shareFlags) {
   return merged;
 }
 
+// Cross-player union of event-check ids (boss defeats / stage clears /
+// game-clears) into the room's persistent teamChecks list. Deliberately a
+// plain deduplicated array, not a bit-packed byte array like
+// checksSeen/mergedItems -- those only cover ids 0-767, but the synthetic
+// game-clear ids go up to 903 (see design spec's Global Constraints).
+function mergeIds(existingIds, newIds) {
+  const set = new Set(existingIds);
+  for (const id of newIds) {
+    set.add(id);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
 export class RoomDO {
   constructor(state) {
     this.state = state;
@@ -119,6 +132,9 @@ export class RoomDO {
     await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
+    await this.state.storage.put("teamChecks", []);
+    await this.state.storage.put("totalDeaths", 0);
+    await this.state.storage.put("totalIfgUses", 0);
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -158,6 +174,9 @@ export class RoomDO {
     await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
+    await this.state.storage.put("teamChecks", []);
+    await this.state.storage.put("totalDeaths", 0);
+    await this.state.storage.put("totalIfgUses", 0);
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -215,8 +234,16 @@ export class RoomDO {
     if (body.epoch >= currentEpoch) {
       checksSeen = orMergeBytes(storedChecksSeen, body.checksSeen);
       await this.state.storage.put("checksSeen", checksSeen);
-      mergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
+      const newMergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
+      const mergedItemsChanged = JSON.stringify(newMergedItems) !== JSON.stringify(storedMergedItems);
+      mergedItems = newMergedItems;
       await this.state.storage.put("mergedItems", mergedItems);
+      if (mergedItemsChanged) {
+        // Only /sync can change mergedItems (see design spec decision 4) --
+        // without this, the team-progress panel would only ever update on a
+        // boss-defeat event, never on an item pickup.
+        await this.broadcastProgress();
+      }
     }
 
     await this.scheduleExpiry();
@@ -267,8 +294,13 @@ export class RoomDO {
 
     const newItems = dedupeNew(body.items, "item");
     const newChecks = dedupeNew(body.checks, "check");
+    // deathDelta/ifgDelta are never deduped -- see design spec decision 3:
+    // they're additive counters that legitimately repeat (dying twice in a
+    // row), unlike one-time check/item completions.
+    const deathDelta = body.deathDelta;
+    const ifgDelta = body.ifgDelta;
 
-    if (newItems.length === 0 && newChecks.length === 0) {
+    if (newItems.length === 0 && newChecks.length === 0 && deathDelta === undefined && ifgDelta === undefined) {
       // Everything in this request was a recent duplicate -- nothing new to log.
       return jsonResponse({ ok: true });
     }
@@ -287,12 +319,46 @@ export class RoomDO {
         event.gameClearTime = body.gameClearTime;
       }
     }
+    if (deathDelta !== undefined) {
+      event.deathDelta = deathDelta;
+    }
+    if (ifgDelta !== undefined) {
+      event.ifgDelta = ifgDelta;
+    }
     events.push(event);
     const trimmed = events.slice(-MAX_EVENTS);
     await this.state.storage.put("events", trimmed);
+
+    if (newChecks.length > 0) {
+      const teamChecks = mergeIds((await this.state.storage.get("teamChecks")) ?? [], newChecks);
+      await this.state.storage.put("teamChecks", teamChecks);
+    }
+    if (deathDelta !== undefined) {
+      const totalDeaths = ((await this.state.storage.get("totalDeaths")) ?? 0) + deathDelta;
+      await this.state.storage.put("totalDeaths", totalDeaths);
+    }
+    if (ifgDelta !== undefined) {
+      const totalIfgUses = ((await this.state.storage.get("totalIfgUses")) ?? 0) + ifgDelta;
+      await this.state.storage.put("totalIfgUses", totalIfgUses);
+    }
+
     await this.scheduleExpiry();
     this.broadcast({ type: "event", event });
+    await this.broadcastProgress();
     return jsonResponse({ ok: true });
+  }
+
+  // Current full team-progress snapshot, broadcast to every connected socket
+  // whenever it changes (from handleEvent above, or from handleSync in Task
+  // 3 when mergedItems changes) -- see design spec decision 4. A separate
+  // message type from {type: "event", event} so event_feed.html's existing
+  // "event"-only handling is completely unaffected.
+  async broadcastProgress() {
+    const teamChecks = (await this.state.storage.get("teamChecks")) ?? [];
+    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
+    const totalDeaths = (await this.state.storage.get("totalDeaths")) ?? 0;
+    const totalIfgUses = (await this.state.storage.get("totalIfgUses")) ?? 0;
+    this.broadcast({ type: "progress", teamChecks, mergedItems, totalDeaths, totalIfgUses });
   }
 
   async handleWebSocket(request) {
@@ -307,7 +373,11 @@ export class RoomDO {
     const mode = (await this.state.storage.get("mode")) ?? null;
     const backlog = (await this.state.storage.get("events")) ?? [];
     const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
-    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags }));
+    const teamChecks = (await this.state.storage.get("teamChecks")) ?? [];
+    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
+    const totalDeaths = (await this.state.storage.get("totalDeaths")) ?? 0;
+    const totalIfgUses = (await this.state.storage.get("totalIfgUses")) ?? 0;
+    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags, teamChecks, mergedItems, totalDeaths, totalIfgUses }));
 
     server.addEventListener("close", () => this.sockets.delete(server));
     server.addEventListener("error", () => this.sockets.delete(server));

@@ -49,6 +49,21 @@ describe("RoomDO /ws", () => {
     ws.close();
   });
 
+  it("includes teamChecks/mergedItems/totalDeaths/totalIfgUses in the init message", async () => {
+    const stub = getStub("test-room-ws-progress-1");
+    await initRoom(stub, "checksSeen");
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await nextMessage(ws);
+    expect(initMsg.teamChecks).toEqual([]);
+    expect(initMsg.mergedItems).toHaveLength(96);
+    expect(initMsg.totalDeaths).toBe(0);
+    expect(initMsg.totalIfgUses).toBe(0);
+    ws.close();
+  });
+
   it("includes shareFlags reported by an earlier /sync call in the init message", async () => {
     const stub = getStub("test-room-ws-4");
     await initRoom(stub, "checksSeen+shared");

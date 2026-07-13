@@ -269,4 +269,42 @@ describe("RoomDO /sync", () => {
     const status = await (await stub.fetch("https://do/admin/status")).json();
     expect(status.mergedItemsBitsSet).toBe(1);
   });
+
+  it("broadcasts a progress message when /sync actually changes mergedItems", async () => {
+    const stub = getStub("test-room-sync-progress-1");
+    await initRoom(stub, "checksSeen+items");
+
+    const wsRes = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = wsRes.webSocket;
+    ws.accept();
+    await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true })); // discard init
+
+    const pending = new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true }));
+    const items = new Array(96).fill(0);
+    items[0] = 1;
+    await sync(stub, new Array(96).fill(0), 0, undefined, items);
+    const msg = await pending;
+    expect(msg.type).toBe("progress");
+    expect(msg.mergedItems[0]).toBe(1);
+    ws.close();
+  });
+
+  it("does not broadcast when /sync doesn't actually change mergedItems", async () => {
+    const stub = getStub("test-room-sync-progress-2");
+    await initRoom(stub, "checksSeen"); // items sharing not enabled -- mergedItems never changes
+
+    const wsRes = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = wsRes.webSocket;
+    ws.accept();
+    await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true })); // discard init
+
+    let gotMessage = false;
+    ws.addEventListener("message", () => { gotMessage = true; });
+    const items = new Array(96).fill(0);
+    items[0] = 1;
+    await sync(stub, new Array(96).fill(0), 0, undefined, items);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(gotMessage).toBe(false);
+    ws.close();
+  });
 });

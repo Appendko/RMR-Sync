@@ -47,6 +47,21 @@ export function isValidGameClearTime(value) {
   return value === undefined || (typeof value === "string" && GAME_CLEAR_TIME_PATTERN.test(value));
 }
 
+// Death/IFG-use counts: always additive and always real (share_info.lua only
+// reports when the underlying RAM counter increases -- see design spec
+// decision 3), so unlike items/checks there's no dedup concern here. The
+// upper bound guards against a garbled client claiming an implausible single
+// jump, not against legitimate repeated small deltas.
+function isValidPositiveDelta(value) {
+  return value === undefined || (Number.isInteger(value) && value >= 1 && value <= 50);
+}
+export function isValidDeathDelta(value) {
+  return isValidPositiveDelta(value);
+}
+export function isValidIfgDelta(value) {
+  return isValidPositiveDelta(value);
+}
+
 export function validateEventBody(body) {
   if (typeof body !== "object" || body === null) {
     return "body must be an object";
@@ -59,8 +74,10 @@ export function validateEventBody(body) {
   }
   const hasItems = body.items !== undefined;
   const hasChecks = body.checks !== undefined;
-  if (!hasItems && !hasChecks) {
-    return "body must include at least one of items or checks";
+  const hasDeathDelta = body.deathDelta !== undefined;
+  const hasIfgDelta = body.ifgDelta !== undefined;
+  if (!hasItems && !hasChecks && !hasDeathDelta && !hasIfgDelta) {
+    return "body must include at least one of items, checks, deathDelta, or ifgDelta";
   }
   if (hasItems && !isValidIdArray(body.items)) {
     return "items must be a non-empty array of up to 20 integer ids between 0 and 999";
@@ -70,6 +87,12 @@ export function validateEventBody(body) {
   }
   if (!isValidGameClearTime(body.gameClearTime)) {
     return "gameClearTime must be an H:MM:SS string";
+  }
+  if (!isValidDeathDelta(body.deathDelta)) {
+    return "deathDelta must be an integer between 1 and 50";
+  }
+  if (!isValidIfgDelta(body.ifgDelta)) {
+    return "ifgDelta must be an integer between 1 and 50";
   }
   return null;
 }

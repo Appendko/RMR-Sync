@@ -111,6 +111,19 @@ function ShareLogic.formatClearTime(frames)
     return string.format("%d:%02d:%02d", hours, minutes, seconds)
 end
 
+-- Returns the positive increase from `before` to `after`, or nil if there's
+-- no prior baseline yet (`before` is nil, meaning this is the first read
+-- this session) or the value didn't increase. Used for monotonic RAM
+-- counters (deaths, IFG uses) where any real change is always an increase --
+-- a decrease would mean `before` was stale/never actually observed, not a
+-- real decrease.
+function ShareLogic.positiveDelta(before, after)
+    if before == nil or after <= before then
+        return nil
+    end
+    return after - before
+end
+
 -- Extracts the randomizer's unique Base64 seed value from a full Option
 -- string, so the room key stays short and stable even when boot.lua's
 -- own 128-byte ROM-read cap truncates sessionSave.param for an unusually

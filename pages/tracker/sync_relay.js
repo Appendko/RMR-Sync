@@ -8,6 +8,238 @@ let lastSeq = -1;
 let pollHandle = null;
 let keepAlivePcs = null; // holds the two RTCPeerConnections so they aren't GC'd
 
+const PROGRESS_WORKER_URL_KEY = "rmrSyncRelayWorkerUrl";
+const PROGRESS_ROOM_KEY_KEY = "rmrSyncRelayRoomKey";
+
+let progressWs = null;
+let progressReconnectDelayMs = 1000;
+const PROGRESS_MAX_RECONNECT_DELAY_MS = 15000;
+let teamChecks = [];
+let mergedItems = new Array(96).fill(0);
+let totalDeaths = 0;
+let totalIfgUses = 0;
+
+function toProgressWebSocketUrl(workerUrl, room) {
+  const httpUrl = new URL(`/room/${encodeURIComponent(room)}/ws`, workerUrl);
+  httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:";
+  return httpUrl.toString();
+}
+
+function isTeamCheckDone(checkId) {
+  return teamChecks.includes(checkId);
+}
+
+function isItemOwned(itemId) {
+  const byteIndex = Math.floor(itemId / 8);
+  const mask = 1 << (itemId % 8);
+  return (mergedItems[byteIndex] & mask) !== 0;
+}
+
+// Either the Part or Chip variant of an armor slot counts as "owned" --
+// whichever one the randomizer actually placed at that check.
+function isArmorSlotOwned(idPair) {
+  return idPair.some((id) => isItemOwned(id));
+}
+
+function makeGridIcon(file, label, done) {
+  const img = document.createElement("img");
+  img.src = file;
+  img.alt = label;
+  img.title = label;
+  if (done) {
+    img.classList.add("done");
+  }
+  return img;
+}
+
+function renderProgressGrid() {
+  const panel = document.getElementById("progressPanel");
+  panel.innerHTML = "";
+
+  for (const title of [1, 2, 3]) {
+    const layout = TEAM_PROGRESS_LAYOUT[title];
+    const section = document.createElement("div");
+    section.className = "title-panel";
+
+    const heading = document.createElement("h3");
+    const titleIcon = document.createElement("img");
+    titleIcon.src = layout.titleIcon;
+    titleIcon.alt = `X${title}`;
+    heading.appendChild(titleIcon);
+    heading.appendChild(document.createTextNode(`Rockman X${title}`));
+    section.appendChild(heading);
+
+    const bossRow = document.createElement("div");
+    bossRow.className = "icon-row";
+    const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
+    bossRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
+    for (const checkId of layout.bossCheckIds) {
+      const info = getCheckIconInfoForId(checkId);
+      bossRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+    }
+    section.appendChild(bossRow);
+
+    const weaponRow = document.createElement("div");
+    weaponRow.className = "icon-row";
+    for (const itemId of layout.weaponIds) {
+      const info = getIconInfoForId(itemId);
+      weaponRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+    }
+    const superInfo = getIconInfoForId(layout.superWeaponId);
+    weaponRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
+    section.appendChild(weaponRow);
+
+    const armorRow = document.createElement("div");
+    armorRow.className = "icon-row";
+    for (const idPair of layout.armor) {
+      const info = getIconInfoForId(idPair[0]);
+      armorRow.appendChild(makeGridIcon(info.file, info.label, isArmorSlotOwned(idPair)));
+    }
+    for (const itemId of layout.subtankIds) {
+      const info = getIconInfoForId(itemId);
+      armorRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+    }
+    section.appendChild(armorRow);
+
+    const sigmaRow = document.createElement("div");
+    sigmaRow.className = "icon-row";
+    for (const checkId of layout.sigmaCheckIds) {
+      const info = getCheckIconInfoForId(checkId);
+      sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+    }
+    const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
+    sigmaRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
+    section.appendChild(sigmaRow);
+
+    panel.appendChild(section);
+  }
+
+  const miscRow = document.createElement("div");
+  miscRow.className = "misc-row";
+  const allClearInfo = getCheckIconInfoForId(ALL_CLEAR_CHECK_ID);
+  miscRow.appendChild(makeGridIcon(allClearInfo.file, allClearInfo.label, isTeamCheckDone(ALL_CLEAR_CHECK_ID)));
+
+  const deathsIcon = document.createElement("img");
+  deathsIcon.src = "assets/deaths.png";
+  deathsIcon.alt = "Deaths";
+  miscRow.appendChild(deathsIcon);
+  const deathsCount = document.createElement("span");
+  deathsCount.textContent = String(totalDeaths);
+  miscRow.appendChild(deathsCount);
+
+  const ifgIcon = document.createElement("img");
+  ifgIcon.src = "assets/igf.png";
+  ifgIcon.alt = "IFG uses";
+  miscRow.appendChild(ifgIcon);
+  const ifgCount = document.createElement("span");
+  ifgCount.textContent = String(totalIfgUses);
+  miscRow.appendChild(ifgCount);
+
+  panel.appendChild(miscRow);
+}
+
+function applyProgressState(msg) {
+  if (msg.teamChecks !== undefined) teamChecks = msg.teamChecks;
+  if (msg.mergedItems !== undefined) mergedItems = msg.mergedItems;
+  if (msg.totalDeaths !== undefined) totalDeaths = msg.totalDeaths;
+  if (msg.totalIfgUses !== undefined) totalIfgUses = msg.totalIfgUses;
+  renderProgressGrid();
+}
+
+// Connects (or reconnects) to the room's WebSocket purely for team-progress
+// display -- entirely independent of the outbox/inbox file relay above (see
+// design spec decision 8: nothing from this connection is ever written to
+// the inbox file Lua reads).
+function connectProgressWs() {
+  const workerUrl = getProgressWorkerUrl();
+  const roomKey = getProgressRoomKey();
+  if (!workerUrl || !roomKey) {
+    return;
+  }
+  if (progressWs) {
+    progressWs.close();
+  }
+  const ws = new WebSocket(toProgressWebSocketUrl(workerUrl, roomKey));
+  progressWs = ws;
+
+  ws.addEventListener("open", () => {
+    if (progressWs !== ws) return; // superseded before it even opened
+    progressReconnectDelayMs = 1000;
+  });
+  ws.addEventListener("close", () => {
+    // A close event on a socket that's no longer the current progressWs means
+    // this socket was deliberately superseded by a newer connectProgressWs()
+    // call (e.g. the user edited the Worker URL/room key), not a real
+    // disconnect -- reconnecting here would fight the new connection and
+    // cause a perpetual reconnect-thrash loop.
+    if (progressWs !== ws) return;
+    setTimeout(connectProgressWs, progressReconnectDelayMs);
+    progressReconnectDelayMs = Math.min(progressReconnectDelayMs * 2, PROGRESS_MAX_RECONNECT_DELAY_MS);
+  });
+  ws.addEventListener("message", (message) => {
+    if (progressWs !== ws) return;
+    let data;
+    try {
+      data = JSON.parse(message.data);
+    } catch {
+      return; // malformed message -- ignore rather than throw
+    }
+    if (data.type === "init" || data.type === "progress") {
+      applyProgressState(data);
+    }
+  });
+}
+
+function getProgressWorkerUrl() {
+  return document.getElementById("progressWorkerUrl").value.trim();
+}
+function getProgressRoomKey() {
+  return document.getElementById("progressRoomKey").value.trim();
+}
+
+function persistProgressSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // not fatal -- this session just won't be remembered next time
+  }
+}
+
+function restoreProgressSettings() {
+  try {
+    const workerUrl = localStorage.getItem(PROGRESS_WORKER_URL_KEY);
+    const roomKey = localStorage.getItem(PROGRESS_ROOM_KEY_KEY);
+    if (workerUrl) document.getElementById("progressWorkerUrl").value = workerUrl;
+    if (roomKey) document.getElementById("progressRoomKey").value = roomKey;
+  } catch {
+    // localStorage unavailable -- just start blank
+  }
+}
+
+// Auto-fills the two progress fields from a successfully-read outbox
+// request, but only if empty -- so connecting a game folder doesn't
+// overwrite a room key the user deliberately typed in to spectate a
+// different room (see design spec decision 7).
+function maybeAutoFillProgressFields(req) {
+  const workerUrlInput = document.getElementById("progressWorkerUrl");
+  const roomKeyInput = document.getElementById("progressRoomKey");
+  let changed = false;
+  if (!workerUrlInput.value.trim() && req.workerUrl) {
+    workerUrlInput.value = req.workerUrl;
+    persistProgressSetting(PROGRESS_WORKER_URL_KEY, req.workerUrl);
+    changed = true;
+  }
+  if (!roomKeyInput.value.trim() && req.roomKey) {
+    roomKeyInput.value = req.roomKey;
+    persistProgressSetting(PROGRESS_ROOM_KEY_KEY, req.roomKey);
+    changed = true;
+  }
+  if (changed) {
+    connectProgressWs();
+  }
+  return changed;
+}
+
 function log(text) {
   statusEl.textContent = text;
 }
@@ -71,6 +303,8 @@ async function tick() {
     return; // no outbox yet, or a torn read -- try again next tick
   }
 
+  maybeAutoFillProgressFields(req);
+
   if (req.session !== lastSession) {
     lastSession = req.session;
     lastSeq = -1;
@@ -96,17 +330,25 @@ async function tick() {
       resp.sync = syncData;
       resp.ok = true;
       for (const ev of req.events || []) {
-        // JSON.stringify drops undefined keys, so this is correct whether ev
-        // carries items, checks, both, or checks+gameClearTime (the
-        // synthetic game-clear/all-clear ids) -- forwarding only `items`
-        // here silently dropped every checks-only event server-side (400:
-        // "must include at least one of items or checks"), with no visible
-        // error since only the top-level /sync error surfaces in the status
-        // line below.
+        // Every field ev might carry is enumerated explicitly here --
+        // JSON.stringify drops undefined keys, so this is correct whether
+        // ev carries any subset of these. This exact spot has already
+        // silently dropped a real field twice (checks, then
+        // gameClearTime) because a new Lua-side field was added without
+        // updating this list -- if you're adding a new field to the event
+        // shape in lua/share_info.lua, it MUST be added here too.
         const evResp = await fetch(`${room}/event`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ player: req.player, game: ev.game, items: ev.items, checks: ev.checks, gameClearTime: ev.gameClearTime }),
+          body: JSON.stringify({
+            player: req.player,
+            game: ev.game,
+            items: ev.items,
+            checks: ev.checks,
+            gameClearTime: ev.gameClearTime,
+            deathDelta: ev.deathDelta,
+            ifgDelta: ev.ifgDelta,
+          }),
         });
         if (evResp.ok) resp.eventsPosted++;
       }
@@ -179,6 +421,13 @@ reconnectBtn.addEventListener("click", async () => {
     log("Permission not granted.");
   }
 });
+
+document.getElementById("progressWorkerUrl").addEventListener("input", (e) => persistProgressSetting(PROGRESS_WORKER_URL_KEY, e.target.value.trim()));
+document.getElementById("progressRoomKey").addEventListener("input", (e) => persistProgressSetting(PROGRESS_ROOM_KEY_KEY, e.target.value.trim()));
+document.getElementById("progressWorkerUrl").addEventListener("change", connectProgressWs);
+document.getElementById("progressRoomKey").addEventListener("change", connectProgressWs);
+restoreProgressSettings();
+connectProgressWs();
 
 (async () => {
   const restored = await restoreFolder();

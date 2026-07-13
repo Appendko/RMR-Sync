@@ -58,6 +58,14 @@ local cCheckIdGameClearAll = 903
 -- session, so it's safe to read once.
 local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
 -- ref/RMR_progress_tracker_displayer_ver_js_20260126/progress_tracker_js/
+-- RMR_progress_tracker.lua's own addresses, reused verbatim (see design spec
+-- decision 5/"Reference material"): a single global IFG-use counter, and a
+-- per-title death counter only meaningful for whichever title is currently
+-- active (same limitation that reference script has -- it never caches
+-- other titles' death counts while inactive).
+local addrIFG = 0x7FFFAE
+local addrDeathByTitle = { 0x7E1F80, 0x7E1FB3, 0x7E1FB4 }
+-- ref/RMR_progress_tracker_displayer_ver_js_20260126/progress_tracker_js/
 -- RMR_progress_tracker.lua's own address for the checks array, distinct
 -- from addrChecksSeen -- like addrChecksSeen, a shared, per-active-title RAM
 -- window (only the currently active title's slice is live), used here only
@@ -283,6 +291,8 @@ local previousChecks = nil
 local previousProgressFrame = nil
 local previousGameClear = nil
 local previousAllClear = nil
+local previousIfg = nil
+local previousDeathByTitle = { nil, nil, nil }
 local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
@@ -484,6 +494,37 @@ local function checkForNewGameClear()
     previousAllClear = allClearNow
 end
 
+-- Reports IFG (Invincible Frame Generator) usage as a one-off event each
+-- time the game's own usage counter increases -- see design spec decision 5
+-- and ref/rmr_option.html for what IFG is. Global, not per-title (addrIFG is
+-- a single shared address). Never synced/merged, same reasoning as checks:
+-- this is a local read-only observation, reported once per real increase.
+local function checkForNewIfg()
+    local ifgNow = cpu[addrIFG]
+    local delta = ShareLogic.positiveDelta(previousIfg, ifgNow)
+    if delta then
+        table.insert(pendingEvents, { game = currentTitle(), ifgDelta = delta })
+        issueRequest()
+    end
+    previousIfg = ifgNow
+end
+
+-- Structural sibling of checkForNewIfg, tracking each title's own death
+-- counter instead -- only the currently-active title's address is
+-- meaningful (see addrDeathByTitle above), so previousDeathByTitle keeps one
+-- baseline per title, updated only for whichever title is active this poll
+-- cycle, so switching titles never produces a false jump.
+local function checkForNewDeaths()
+    local title = currentTitle()
+    local deathsNow = cpu[addrDeathByTitle[title]]
+    local delta = ShareLogic.positiveDelta(previousDeathByTitle[title], deathsNow)
+    if delta then
+        table.insert(pendingEvents, { game = title, deathDelta = delta })
+        issueRequest()
+    end
+    previousDeathByTitle[title] = deathsNow
+end
+
 -- Local-only, single-player consistency fix, no server round-trip at all:
 -- whenever this player's own item 572 (3ItKeyVavaStage) bit is set in RAM --
 -- from a real local pickup, or from a cross-player merge grant, it makes no
@@ -493,8 +534,8 @@ end
 -- player owns the key is expected, correct behavior, not something this
 -- guards against -- it just keeps the check flag truthful about it. Cheap
 -- and idempotent (OR-only), so no need to gate this on a diff/baseline the
--- way checkForNewChecks/checkForNewGameClear above do -- there's nothing to
--- report or de-duplicate, just a bit to keep in sync every cycle.
+-- way the reporting-to-server checks above do -- there's nothing to report
+-- or de-duplicate, just a bit to keep in sync every cycle.
 local function checkForVavaStageKeyOwned()
     if (cpu[addrItems + cVavaStageKeyItemByte] & cVavaStageKeyItemMask) ~= 0 then
         writeVavaStageKeyCheck()
@@ -509,6 +550,8 @@ while true do
         checkForNewItems()
         checkForNewChecks()
         checkForNewGameClear()
+        checkForNewIfg()
+        checkForNewDeaths()
         checkForVavaStageKeyOwned()
         if outstandingSeq ~= nil then
             staleCycles = staleCycles + 1
