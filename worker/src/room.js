@@ -111,6 +111,9 @@ export class RoomDO {
     await this.state.storage.put("resetEpoch", 0);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
+    await this.state.storage.put("teamChecks", []);
+    await this.state.storage.put("totalDeaths", 0);
+    await this.state.storage.put("totalIfgUses", 0);
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();
@@ -150,6 +153,9 @@ export class RoomDO {
     await this.state.storage.put("mode", newMode);
     await this.state.storage.put("checksSeen", new Array(CHECKS_SEEN_LENGTH).fill(0));
     await this.state.storage.put("mergedItems", new Array(ITEMS_LENGTH).fill(0));
+    await this.state.storage.put("teamChecks", []);
+    await this.state.storage.put("totalDeaths", 0);
+    await this.state.storage.put("totalIfgUses", 0);
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.scheduleExpiry();

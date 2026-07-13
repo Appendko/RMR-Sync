@@ -69,6 +69,19 @@ describe("RoomDO admin lifecycle", () => {
     expect(status).toEqual({ mode: "checksSeen+shared", checksSeenBitsSet: 0, mergedItemsBitsSet: 0, eventCount: 0, connected: 0 });
   });
 
+  it("initializes teamChecks/totalDeaths/totalIfgUses to empty/zero on creation", async () => {
+    const stub = getStub("test-room-progress-init-1");
+    await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "s3cr3t" });
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await new Promise((resolve) => ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true }));
+    expect(initMsg.teamChecks).toEqual([]);
+    expect(initMsg.totalDeaths).toBe(0);
+    expect(initMsg.totalIfgUses).toBe(0);
+    ws.close();
+  });
+
   it("rejects reset with a missing or wrong admin secret", async () => {
     const stub = getStub("test-room-reset-2");
     await postJson(stub, "/admin/init", { mode: "checksSeen", adminSecret: "correct-secret" });
