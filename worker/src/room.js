@@ -226,8 +226,16 @@ export class RoomDO {
     if (body.epoch >= currentEpoch) {
       checksSeen = orMergeBytes(storedChecksSeen, body.checksSeen);
       await this.state.storage.put("checksSeen", checksSeen);
-      mergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
+      const newMergedItems = mergeIncomingItems(storedMergedItems, body.items, mode, shareFlags);
+      const mergedItemsChanged = JSON.stringify(newMergedItems) !== JSON.stringify(storedMergedItems);
+      mergedItems = newMergedItems;
       await this.state.storage.put("mergedItems", mergedItems);
+      if (mergedItemsChanged) {
+        // Only /sync can change mergedItems (see design spec decision 4) --
+        // without this, the team-progress panel would only ever update on a
+        // boss-defeat event, never on an item pickup.
+        await this.broadcastProgress();
+      }
     }
 
     await this.scheduleExpiry();
@@ -357,7 +365,11 @@ export class RoomDO {
     const mode = (await this.state.storage.get("mode")) ?? null;
     const backlog = (await this.state.storage.get("events")) ?? [];
     const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
-    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags }));
+    const teamChecks = (await this.state.storage.get("teamChecks")) ?? [];
+    const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
+    const totalDeaths = (await this.state.storage.get("totalDeaths")) ?? 0;
+    const totalIfgUses = (await this.state.storage.get("totalIfgUses")) ?? 0;
+    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags, teamChecks, mergedItems, totalDeaths, totalIfgUses }));
 
     server.addEventListener("close", () => this.sockets.delete(server));
     server.addEventListener("error", () => this.sockets.delete(server));
