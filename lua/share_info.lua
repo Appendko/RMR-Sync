@@ -65,6 +65,29 @@ local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
 -- other titles' death counts while inactive).
 local addrIFG = 0x7FFFAE
 local addrDeathByTitle = { 0x7E1F80, 0x7E1FB3, 0x7E1FB4 }
+-- ref/RMR_progress_tracker_displayer_ver_js_20260126/progress_tracker_js/
+-- RMR_progress_tracker.lua's own address for the checks array, distinct
+-- from addrChecksSeen -- like addrChecksSeen, a shared, per-active-title RAM
+-- window (only the currently active title's slice is live), used here only
+-- for the one deliberate exception below (writeVavaStageKeyCheck).
+local addrChecks = 0x7FFF60
+-- Check 736 (3ChKeyVavaStage, tracker/check_id_map.js) -- confirmed live
+-- (seen in an actual checks diff capture) and cross-referenced against the
+-- randomizer's own C# source (hAppendVavaStageKeyIntoCheckSequence appends
+-- check 0x3E0, 1-indexed-by-title in the C#'s own numbering; translated to
+-- this project's 0-indexed scheme: (3-1)*256 + (0x3E0 & 0xFF) = 736).
+-- Deliberately NOT added to ShareLogic.isEventCheckId -- kept in sync with
+-- item 572 purely locally (see checkForVavaStageKeyOwned/
+-- writeVavaStageKeyCheck below), never reported anywhere.
+local cVavaStageKeyCheckByte = 92 -- floor(736 / 8), flat byte index in the 96-byte checks array
+local cVavaStageKeyCheckMask = 0x01 -- 736 % 8
+local cVavaStageKeyCheckTitle = 3 -- X3
+local cVavaStageKeyCheckTitleByte = cVavaStageKeyCheckByte - (cVavaStageKeyCheckTitle - 1) * cChecksPerTitle -- 92 - 64 = 28
+-- Item 572 (3ItKeyVavaStage, pages/tracker/item_id_map.js) -- addrItems is
+-- already a flat, all-3-titles-simultaneously region (see writeMergedItems
+-- below), so no title-gating is needed to read it, unlike the check write.
+local cVavaStageKeyItemByte = 71 -- floor(572 / 8)
+local cVavaStageKeyItemMask = 0x10 -- 572 % 8
 local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-acquired items; can trigger an early outbox write ahead of the heartbeat
 local cWaitFrames = 600 -- ~10s at 60fps: idle-only heartbeat (pulls others' checksSeen updates when nothing local has triggered a request) -- deliberately slow to reduce Worker/Durable-Object request volume for a real multi-player session; checksSeen sync has no real latency requirement
 local cStaleThreshold = 20 -- ~20 fast-cycles * ~0.2s = ~4s of genuine unresponsiveness before warning, matching the original user-facing timing despite ack-checking now running on the fast timer instead of the (now much slower) idle heartbeat
@@ -165,6 +188,26 @@ local function writeMergedItems(merged, forceOverwrite)
             sessionSave.items[i] = (sessionSave.items[i] or 0) | merged[i + 1]
             cpu[addrItems + i] = cpu[addrItems + i] | merged[i + 1]
         end
+    end
+end
+
+-- Deliberate, narrow exception to "checks are never synced back" (see the
+-- long comment above readChecks() for why that rule exists in general):
+-- item 572 (3ItKeyVavaStage) and its corresponding check 736 are a fixed,
+-- non-randomized pair (not shuffled into the randomizer's own item/check
+-- pool the way a normal check/item is), so every player's copy of this one
+-- specific check means exactly the same thing -- writing it back carries
+-- none of the "a teammate's progress in a title I haven't touched
+-- incorrectly advances my own hint pointer" risk that motivated the general
+-- rule. Same write-shape as writeChecksSeen: unconditional in
+-- sessionSave.checks (our own all-titles bookkeeping cache), RAM only while
+-- title 3 is currently active (addrChecks, like addrChecksSeen, is a
+-- shared per-active-title window). OR-only (never overwrites), matching
+-- how boot.lua's own synchronize_or treats this array as set-only/monotonic.
+local function writeVavaStageKeyCheck()
+    sessionSave.checks[cVavaStageKeyCheckByte] = (sessionSave.checks[cVavaStageKeyCheckByte] or 0) | cVavaStageKeyCheckMask
+    if currentTitle() == cVavaStageKeyCheckTitle then
+        cpu[addrChecks + cVavaStageKeyCheckTitleByte] = cpu[addrChecks + cVavaStageKeyCheckTitleByte] | cVavaStageKeyCheckMask
     end
 end
 
@@ -482,6 +525,22 @@ local function checkForNewDeaths()
     previousDeathByTitle[title] = deathsNow
 end
 
+-- Local-only, single-player consistency fix, no server round-trip at all:
+-- whenever this player's own item 572 (3ItKeyVavaStage) bit is set in RAM --
+-- from a real local pickup, or from a cross-player merge grant, it makes no
+-- difference which -- also set check 736 (3ChKeyVavaStage) to match (see
+-- writeVavaStageKeyCheck's own comment for why writing this one specific
+-- check back is safe). The Vava-stage teleporter disappearing the moment a
+-- player owns the key is expected, correct behavior, not something this
+-- guards against -- it just keeps the check flag truthful about it. Cheap
+-- and idempotent (OR-only), so no need to gate this on a diff/baseline the
+-- way the reporting-to-server checks above do.
+local function checkForVavaStageKeyOwned()
+    if (cpu[addrItems + cVavaStageKeyItemByte] & cVavaStageKeyItemMask) ~= 0 then
+        writeVavaStageKeyCheck()
+    end
+end
+
 while true do
     itemCheckFrames = itemCheckFrames - 1
     if itemCheckFrames <= 0 then
@@ -492,6 +551,7 @@ while true do
         checkForNewGameClear()
         checkForNewIfg()
         checkForNewDeaths()
+        checkForVavaStageKeyOwned()
         if outstandingSeq ~= nil then
             staleCycles = staleCycles + 1
             if staleCycles >= cStaleThreshold then
