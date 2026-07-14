@@ -105,6 +105,30 @@ function makeGaugeIcon(file, label, text) {
   return cell;
 }
 
+const ARMOR_PART_NAMES = ["head", "arm", "body", "foot"];
+
+function makeArmorOverlay(title, layout) {
+  const cell = document.createElement("div");
+  cell.className = "armor-overlay";
+  const base = document.createElement("img");
+  base.src = "assets/x.png";
+  base.alt = "X";
+  cell.appendChild(base);
+  layout.armor.forEach((idPair, i) => {
+    const partName = ARMOR_PART_NAMES[i];
+    const part = document.createElement("img");
+    part.src = `assets/x${title}_x_${partName}.png`;
+    part.alt = partName;
+    part.title = partName;
+    part.className = "armor-part";
+    if (isArmorSlotOwned(idPair)) {
+      part.classList.add("done");
+    }
+    cell.appendChild(part);
+  });
+  return cell;
+}
+
 function renderProgressGrid() {
   const panel = document.getElementById("progressPanel");
   panel.innerHTML = "";
@@ -134,32 +158,25 @@ function renderProgressGrid() {
 
     const weaponRow = document.createElement("div");
     weaponRow.className = "icon-grid";
+    weaponRow.appendChild(makeArmorOverlay(title, layout));
     for (const itemId of layout.weaponIds) {
       const info = getIconInfoForId(itemId);
       weaponRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
     }
-    const superInfo = getIconInfoForId(layout.superWeaponId);
-    weaponRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
     section.appendChild(weaponRow);
-
-    const armorRow = document.createElement("div");
-    armorRow.className = "icon-grid";
-    for (const idPair of layout.armor) {
-      const info = getIconInfoForId(idPair[0]);
-      armorRow.appendChild(makeGridIcon(info.file, info.label, isArmorSlotOwned(idPair)));
-    }
-    for (const itemId of layout.subtankIds) {
-      const info = getIconInfoForId(itemId);
-      armorRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
-    }
-    section.appendChild(armorRow);
 
     const sigmaRow = document.createElement("div");
     sigmaRow.className = "icon-grid";
+    for (const itemId of layout.subtankIds) {
+      const info = getIconInfoForId(itemId);
+      sigmaRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+    }
     for (const checkId of layout.sigmaCheckIds) {
       const info = getCheckIconInfoForId(checkId);
       sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
     }
+    const superInfo = getIconInfoForId(layout.superWeaponId);
+    sigmaRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
     const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
     sigmaRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
     section.appendChild(sigmaRow);
