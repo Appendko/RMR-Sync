@@ -129,6 +129,11 @@ function makeArmorOverlay(title, layout) {
   return cell;
 }
 
+function renderGaugeCell(gauge) {
+  const count = gauge.ids.filter(isItemOwned).length;
+  return makeGaugeIcon(gauge.file, gauge.label, `${count}/${gauge.ids.length}`);
+}
+
 function renderProgressGrid() {
   const panel = document.getElementById("progressPanel");
   panel.innerHTML = "";
@@ -167,10 +172,6 @@ function renderProgressGrid() {
 
     const sigmaRow = document.createElement("div");
     sigmaRow.className = "icon-grid";
-    for (const itemId of layout.subtankIds) {
-      const info = getIconInfoForId(itemId);
-      sigmaRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
-    }
     for (const checkId of layout.sigmaCheckIds) {
       const info = getCheckIconInfoForId(checkId);
       sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
@@ -180,6 +181,13 @@ function renderProgressGrid() {
     const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
     sigmaRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
     section.appendChild(sigmaRow);
+
+    const gaugeRow = document.createElement("div");
+    gaugeRow.className = "icon-grid";
+    for (const gauge of layout.gauges) {
+      gaugeRow.appendChild(renderGaugeCell(gauge));
+    }
+    section.appendChild(gaugeRow);
 
     panel.appendChild(section);
   }
