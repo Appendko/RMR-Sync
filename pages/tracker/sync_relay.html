@@ -46,31 +46,57 @@
 
   .misc-row { display: flex; align-items: center; gap: 1em; margin-top: 0.5em; }
   .misc-row .icon-cell, .misc-row .gauge-cell { width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
+
+  .panel-toggle-row { display: flex; justify-content: flex-end; margin-bottom: 0.5em; }
+  #hidePanelBtn { background: none; border: 1px solid var(--text-dim); color: var(--text); border-radius: 4px; font-size: 0.85em; padding: 0.3em 0.7em; cursor: pointer; }
+
+  .corner-controls { position: fixed; top: 1em; right: 1em; display: none; align-items: center; gap: 0.5em; z-index: 10; }
+  .corner-controls.visible { display: flex; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #888; }
+  .status-dot.connected { background: #3ecf6a; }
+  .status-dot.partial { background: #e0a83e; }
+  .status-dot.disconnected { background: #d94f4f; }
+  #reopenPanelBtn { border-radius: 50%; width: 2.2em; height: 2.2em; padding: 0; font-size: 1.1em; line-height: 1; background: var(--panel-bg); border: 1px solid var(--text-dim); color: var(--text); cursor: pointer; }
+
+  #connectionPanel.collapsed { display: none; }
 </style>
 </head>
 <body>
 <h1>RMR Sync — Relay</h1>
-<p>
-  Keep this tab open while you play. It reads your game's local sync files
-  and relays them to the Cloudflare backend — no other setup needed beyond
-  picking the folder that contains <code>boot.lua</code> once.
-  Requires Chrome, Edge, or another Chromium-based browser.
-</p>
 
-<h2>Team progress</h2>
-<p>
-  Enter a Worker URL and room key to see the team's progress below — this
-  works even without connecting a game folder. If you connect a folder
-  below, these fill in automatically from your own game's settings.
-</p>
-<label>Worker URL<br><input type="text" id="progressWorkerUrl" style="width:100%" autocomplete="off" /></label><br><br>
-<label>Room key<br><input type="text" id="progressRoomKey" style="width:100%" autocomplete="off" /></label>
+<div class="corner-controls" id="cornerControls">
+  <span class="status-dot" id="statusDot"></span>
+  <button id="reopenPanelBtn" title="Show connection settings">⚙</button>
+</div>
+
+<div id="connectionPanel">
+  <p>
+    Keep this tab open while you play. It reads your game's local sync files
+    and relays them to the Cloudflare backend — no other setup needed beyond
+    picking the folder that contains <code>boot.lua</code> once.
+    Requires Chrome, Edge, or another Chromium-based browser.
+  </p>
+
+  <div class="panel-toggle-row">
+    <button id="hidePanelBtn">Hide setup</button>
+  </div>
+
+  <h2>Team progress</h2>
+  <p>
+    Enter a Worker URL and room key to see the team's progress below — this
+    works even without connecting a game folder. If you connect a folder
+    below, these fill in automatically from your own game's settings.
+  </p>
+  <label>Worker URL<br><input type="text" id="progressWorkerUrl" style="width:100%" autocomplete="off" /></label><br><br>
+  <label>Room key<br><input type="text" id="progressRoomKey" style="width:100%" autocomplete="off" /></label>
+
+  <h2>Game connection</h2>
+  <button id="pickBtn">Choose game folder</button>
+  <button id="reconnectBtn" style="display:none">Reconnect folder</button>
+  <div id="status">Not connected.</div>
+</div>
+
 <div id="progressPanel"></div>
-
-<h2>Game connection</h2>
-<button id="pickBtn">Choose game folder</button>
-<button id="reconnectBtn" style="display:none">Reconnect folder</button>
-<div id="status">Not connected.</div>
 <script src="item_id_map.js"></script>
 <script src="item_names_en.js"></script>
 <script src="item_names_ja.js"></script>

@@ -10,6 +10,41 @@ let keepAlivePcs = null; // holds the two RTCPeerConnections so they aren't GC'd
 
 const PROGRESS_WORKER_URL_KEY = "rmrSyncRelayWorkerUrl";
 const PROGRESS_ROOM_KEY_KEY = "rmrSyncRelayRoomKey";
+const PANEL_COLLAPSED_KEY = "rmrSyncRelayPanelCollapsed";
+
+function setPanelCollapsed(collapsed) {
+  document.getElementById("connectionPanel").classList.toggle("collapsed", collapsed);
+  document.getElementById("cornerControls").classList.toggle("visible", collapsed);
+  try {
+    localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // not fatal -- this session just won't remember the choice next time
+  }
+}
+
+function restorePanelCollapsed() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(PANEL_COLLAPSED_KEY) === "1";
+  } catch {
+    // localStorage unavailable -- default to expanded
+  }
+  setPanelCollapsed(collapsed);
+}
+
+function updateStatusDot() {
+  const dot = document.getElementById("statusDot");
+  const folderConnected = dirHandle !== null;
+  const wsConnected = progressWs !== null && progressWs.readyState === WebSocket.OPEN;
+  dot.className = "status-dot";
+  if (folderConnected && wsConnected) {
+    dot.classList.add("connected");
+  } else if (wsConnected) {
+    dot.classList.add("partial");
+  } else {
+    dot.classList.add("disconnected");
+  }
+}
 
 let progressWs = null;
 let progressReconnectDelayMs = 1000;
@@ -170,6 +205,7 @@ function connectProgressWs() {
   ws.addEventListener("open", () => {
     if (progressWs !== ws) return; // superseded before it even opened
     progressReconnectDelayMs = 1000;
+    updateStatusDot();
   });
   ws.addEventListener("close", () => {
     // A close event on a socket that's no longer the current progressWs means
@@ -180,6 +216,7 @@ function connectProgressWs() {
     if (progressWs !== ws) return;
     setTimeout(connectProgressWs, progressReconnectDelayMs);
     progressReconnectDelayMs = Math.min(progressReconnectDelayMs * 2, PROGRESS_MAX_RECONNECT_DELAY_MS);
+    updateStatusDot();
   });
   ws.addEventListener("message", (message) => {
     if (progressWs !== ws) return;
@@ -409,6 +446,7 @@ pickBtn.addEventListener("click", async () => {
     dirHandle = await pickFolder();
     reconnectBtn.style.display = "none";
     startPolling();
+    updateStatusDot();
   } catch (e) {
     log("Folder selection cancelled or failed: " + e);
   }
@@ -422,6 +460,7 @@ reconnectBtn.addEventListener("click", async () => {
     dirHandle = handle;
     reconnectBtn.style.display = "none";
     startPolling();
+    updateStatusDot();
   } else {
     log("Permission not granted.");
   }
@@ -433,6 +472,10 @@ document.getElementById("progressWorkerUrl").addEventListener("change", connectP
 document.getElementById("progressRoomKey").addEventListener("change", connectProgressWs);
 restoreProgressSettings();
 connectProgressWs();
+document.getElementById("hidePanelBtn").addEventListener("click", () => setPanelCollapsed(true));
+document.getElementById("reopenPanelBtn").addEventListener("click", () => setPanelCollapsed(false));
+restorePanelCollapsed();
+updateStatusDot();
 
 (async () => {
   const restored = await restoreFolder();
@@ -445,4 +488,5 @@ connectProgressWs();
   } else {
     log("Not connected. Click \"Choose game folder\" to select the folder containing boot.lua.");
   }
+  updateStatusDot();
 })();
