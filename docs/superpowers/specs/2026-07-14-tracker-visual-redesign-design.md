@@ -78,12 +78,15 @@ Two things from the reference are deliberately **not** being copied:
    X + owned parts layered on top) instead of four separate small icons.
 4. The grid also surfaces every other item category the randomizer tracks
    that this project's own `mergedItems` already carries but the grid
-   never rendered: permanent life-up/energy-up upgrade counts, buster
-   ammo/attack/fire-rate/dash-shot/charge tiers (all 3 titles), X2's Zero
-   armor parts, and X3's ride armor + sub-boss kills. `mergedItems` is a
-   full, unconditional 96-byte OR-merge in `checksSeen+items` mode (see
-   `worker/src/room.js`'s `mergeIncomingItems`) — every one of these item
-   ids is already flowing into `sync_relay.js` today, just not drawn.
+   never rendered, matching the reference tracker's own counter-row
+   composition as closely as possible: sigma-key count, subtank count
+   (replacing today's 4 individual subtank icons), permanent life-up/
+   energy-up upgrade counts, buster ammo/attack/fire-rate/dash-shot/charge
+   tiers (all 3 titles), X2's Zero armor parts, and X3's ride armor +
+   sub-boss kills. `mergedItems` is a full, unconditional 96-byte OR-merge
+   in `checksSeen+items` mode (see `worker/src/room.js`'s
+   `mergeIncomingItems`) — every one of these item ids is already flowing
+   into `sync_relay.js` today, just not drawn.
 
 ## Design
 
@@ -139,16 +142,18 @@ framework):
   reference does, since those weren't asked for; see Non-goals):
   1. Opening check icon + 8 boss check icons (9 cells).
   2. Armor overlay (1 cell, see below) + 8 weapon icons (9 cells).
-  3. 4 subtank icons + this title's sigma-key checks + the super weapon
-     icon + the game-clear check icon (count varies 9-11 by title since
-     X2/X3 have more sigma keys than X1 — the grid simply wraps to a
-     second row for those titles; no special-casing needed).
-  4. 7 gauge cells common to all 3 titles: life-up count, energy-up count,
-     then the 5 buster-tier gauges (ammo/attack/fire-rate/dash-shot/charge)
-     — see design section 4 below. Same order the reference tracker uses
-     (`hp`, `wp`, then `b`/`ba`/`br`/`bd`/`bc`), just without its `sigma`/
-     `e` slots, which this project already shows as individual per-key/
-     per-subtank icons elsewhere in the grid.
+  3. This title's sigma-fortress-clear check icons + the super weapon icon
+     + the game-clear check icon (count varies 3-6 by title since X2/X3
+     have more sigma-fortress checks than X1 — the grid simply wraps to a
+     second row for those titles; no special-casing needed). Subtank icons
+     no longer render here individually — folded into the gauge row below,
+     per design section 4.
+  4. 9 gauge cells common to all 3 titles, in the exact order and
+     composition the reference tracker's own second `GridContainer` uses
+     (`sigma`, `hp`, `wp`, `e`, then `b`/`ba`/`br`/`bd`/`bc`): sigma-key
+     count, life-up count, energy-up count, subtank count, then the 5
+     buster-tier gauges (ammo/attack/fire-rate/dash-shot/charge) — see
+     design section 4 below.
   5. Title-specific extras, only rendered for the title that has them: X2
      gets 3 Zero-armor icons; X3 gets 3 sub-boss icons + 4 ride-armor
      icons (7 cells). X1 has no 5th grid.
@@ -223,7 +228,7 @@ rendering changes, not the ownership logic. The 4 subtank icons keep
 rendering as their own separate small icons immediately after the armor
 cell in the same grid row, unchanged from today.
 
-### 4. HP/Energy upgrade counts, buster tiers, X2 Zero armor, X3 ride armor & sub-bosses
+### 4. Sigma-key/subtank/HP/Energy counts, buster tiers, X2 Zero armor, X3 ride armor & sub-bosses
 
 `item_id_map.js` already has ids for all of these (confirmed by grep — none
 of this needs new IDs invented). 8 icon files needed copying from
@@ -234,17 +239,26 @@ buster-tier icons, shared across all 3 titles, same as the reference's own
 `bImgObject` reuse) and `x2_zero_head.ico`/`x2_zero_body.ico`/
 `x2_zero_foot.ico`. Ride armor and sub-boss icons needed no copying —
 `x3_ridearmor_{f,h,k,n}.png` and `x3_subbosses_{bff,mbb,vava}.png` already
-existed in `pages/tracker/assets/` from earlier work. The life-up/energy-up
-icons need no copying either — `heart.png`/`energy.png` (the reference's
-own `hp`/`wp` icons) already exist in `pages/tracker/assets/`.
+existed in `pages/tracker/assets/` from earlier work. The sigma-key,
+subtank, and life-up/energy-up icons need no copying either —
+`sigma.png`/`etank.png`/`heart.png`/`energy.png` (the reference's own
+`sigma`/`e`/`hp`/`wp` icons) already exist in `pages/tracker/assets/`.
 
-Unlike every boolean cell so far (owned or not), a life-up/energy-up count
-or a buster tier is a **count**: how many of that category's items are
-owned, out of the category's total. This reuses the exact same
-icon+centered-outlined-number technique already planned for the deaths/IFG
-counters in section 2 — same `.hud-number` class, just
-`${owned.length}/${ids.length}` as the text instead of a running total. No
-new CSS needed beyond what section 2 already defines.
+Unlike every boolean cell so far (owned or not), a sigma-key count,
+subtank count, life-up/energy-up count, or buster tier is a **count**: how
+many of that category's items are owned, out of the category's total.
+This reuses the exact same icon+centered-outlined-number technique already
+planned for the deaths/IFG counters in section 2 — same `.hud-number`
+class, just `${owned.length}/${ids.length}` as the text instead of a
+running total. No new CSS needed beyond what section 2 already defines.
+
+The subtank count replaces this project's previous treatment (4 individual
+subtank icons in the armor row) — `subtankIds` in `team_progress_layout.js`
+is unchanged, it now just feeds a gauge instead of 4 separate
+`makeGridIcon` calls. The sigma-key count is new — this project previously
+had no cell at all for it; the existing `sigmaCheckIds` row (sigma
+-fortress-clear checks, a different stat — see Non-goals) is unaffected
+and keeps rendering as individual icons.
 
 Labels are hardcoded plain-English strings directly in the new layout data
 (see below), not routed through `item_names_en.js`/`ja`/`zhtw` — this
@@ -258,17 +272,21 @@ this isn't a new class of gap.
 New fields added to each title's entry in `team_progress_layout.js`:
 
 ```js
-// Common to all 3 titles, in the same order the reference tracker's own
-// Common.tsx renders them (hp, wp, then the 5 buster tiers). ids per grep
-// of item_id_map.js -- 1ItLifeUp1-8/1ItLifeUpD1-6 (hp), 1ItEnergyUp1-14
-// (wp), 1ItBusterAmmo1-5, 1ItBusterAttack100/150,
-// 1ItBusterFireRate3/4/5/6/30/60, 1ItBusterDashShot1/Unlimited,
-// 1ItCharge75/100/125/150 (and the 2It.../3It... equivalents for X2/X3).
-// Each displayed as "<owned count>/<category size>" on one shared icon,
-// not as individual booleans.
+// Common to all 3 titles, in the exact order and composition the
+// reference tracker's own Common.tsx second GridContainer uses: sigma
+// (key count), hp, wp, e (subtank count), then the 5 buster tiers -- 9
+// cells total, matching the reference's own row exactly. ids per grep of
+// item_id_map.js -- 1ItKeyS1-13 (sigma), 1ItLifeUp1-8/1ItLifeUpD1-6 (hp),
+// 1ItEnergyUp1-14 (wp), 1ItSubtank1-4 (e), 1ItBusterAmmo1-5,
+// 1ItBusterAttack100/150, 1ItBusterFireRate3/4/5/6/30/60,
+// 1ItBusterDashShot1/Unlimited, 1ItCharge75/100/125/150 (and the
+// 2It.../3It... equivalents for X2/X3). Each displayed as "<owned
+// count>/<category size>" on one shared icon, not as individual booleans.
 gauges: [
+  { file: "assets/sigma.png", label: "Sigma keys collected", ids: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76] },
   { file: "assets/heart.png", label: "Life-up upgrades", ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] },
   { file: "assets/energy.png", label: "Energy-up upgrades", ids: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29] },
+  { file: "assets/etank.png", label: "Subtanks collected", ids: [36, 37, 38, 39] },
   { file: "assets/b.png", label: "Buster ammo capacity", ids: [96, 97, 98, 99, 100] },
   { file: "assets/ba.png", label: "Buster attack power", ids: [101, 102] },
   { file: "assets/br.png", label: "Buster fire rate", ids: [104, 105, 106, 107, 108, 109] },
@@ -277,11 +295,15 @@ gauges: [
 ],
 ```
 
-(X2's `gauges` uses hp ids `[256-269]`, wp ids `[272-285]`, then buster ids
-`[352-356]`/`[357,358]`/`[360-365]`/`[366,367]`/`[368-371]`; X3's uses hp
-ids `[512-525]`, wp ids `[528-541]`, then buster ids `[608-612]`/
-`[613,614]`/`[616-621]`/`[622,623]`/`[624-627]` — same 7-entry shape, same
-icon files, only the `ids` arrays change per title.)
+(X2's `gauges` uses sigma-key ids `[320-332]` (13), hp ids `[256-269]`, wp
+ids `[272-285]`, subtank ids `[292-295]`, then buster ids `[352-356]`/
+`[357,358]`/`[360-365]`/`[366,367]`/`[368-371]`; X3's uses sigma-key ids
+`[576-589]` (14 — X3 has one more sigma key than X1/X2), hp ids
+`[512-525]`, wp ids `[528-541]`, subtank ids `[548-551]`, then buster ids
+`[608-612]`/`[613,614]`/`[616-621]`/`[622,623]`/`[624-627]` — same 9-entry
+shape, same icon files, only the `ids` arrays change per title. The
+subtank `ids` are exactly this title's existing `subtankIds` array —
+`gauges` reads the same array, it isn't a new/duplicate source of truth.)
 
 X2 only, appended after `gauges`:
 
@@ -336,10 +358,10 @@ helper.
   `rmrSyncRelayPanelCollapsed`, wire the "Hide setup"/corner-icon buttons,
   drive the status dot's color from existing connection state).
 - `pages/tracker/team_progress_layout.js` — existing armor id-pair
-  ordering is unchanged (already fits the overlay technique directly);
-  adds the new `gauges` (all titles: hp/wp counts + 5 buster tiers) and
-  `zero` (X2)/`rideArmor`+`subbosses` (X3) fields described in design
-  section 4.
+  ordering and `subtankIds` are unchanged (the latter now also feeds the
+  gauge row instead of individual icons); adds the new `gauges` (all
+  titles: sigma-key/subtank/hp/wp counts + 5 buster tiers) and `zero`
+  (X2)/`rideArmor`+`subbosses` (X3) fields described in design section 4.
 - `pages/tracker/assets/` — 8 new files copied from the reference
   tracker's own asset folder (already done as part of this design pass):
   `b.png`, `ba.png`, `br.png`, `bd.png`, `bc.png`, `x2_zero_head.ico`,
@@ -354,11 +376,59 @@ helper.
   array; nothing server- or Lua-side needs to change to expose them.
 - Not reproducing the reference tracker's per-language translation tables
   for the new gauge/boolean cells' tooltips (see design section 4's
-  rationale) or its `sigma`/`e` count-cell treatment — this project
-  already shows sigma keys and subtanks as individual per-key/per-subtank
-  icons elsewhere in the grid, which is more granular than the
-  reference's single count cell, so those two are intentionally left as
-  -is rather than replaced with a count.
+  rationale).
 - No automated tests — consistent with this project's existing convention
   that `pages/tracker/*` (browser-only UI) has no test suite; verified via
   manual browser testing instead.
+
+## Known gaps vs. the reference tracker (not reproduced)
+
+A full audit of the reference's source (all of `src/component/` and
+`src/utils/variable.ts`) turned up more than what's covered above. Listed
+here so the choice to include or defer each is explicit, not accidental:
+
+- **Boss "key obtained" sub-state.** The reference's boss icons combine
+  two flags (key-item-in-hand, stage-cleared) into one grayscale
+  condition. This project's boss icons use stage-cleared only (matching
+  what's already in `bossCheckIds`) — collapsing "have the key but
+  haven't cleared the stage" and "haven't even reached it" into one
+  visual state. Recommended to leave as-is: a shared team tracker cares
+  about "is the stage done," not "who's holding the key," so the extra
+  state has little value here.
+- **"Stage changed" flourish badge.** X1's SC/BN/SM and X3's EH/FB/GB
+  bosses have a `StageVaried` item (confirmed present in `item_id_map.js`:
+  e.g. `1ItStageVariedSC`=57) marking that boss's alternate layout is
+  active this seed. The reference shows a small corner badge for this;
+  nothing here does. Cheap to add (a small inline-SVG badge on 6 specific
+  boss cells, no new image asset needed) if wanted — not built yet because
+  it wasn't asked for.
+- **Sigma-fortress-clear GIF + countdown + KO-stamp.** The reference
+  renders `sigmaBosses` (its name for the fortress-stage-clear checks —
+  this project's existing `sigmaCheckIds`) as one animated GIF cell with a
+  "stages remaining" number overlay, stamped with a `beaten.png` KO icon
+  once the title's final stage clears. This project keeps `sigmaCheckIds`
+  as individual per-stage icons (unchanged by this redesign). Deliberately
+  not converted: the GIF+countdown treatment shows less information (one
+  number) than individual icons (which specific stage is done) — for a
+  *team* tracker, seeing which stage a teammate still needs done seems
+  more useful than a countdown, so this was left alone rather than
+  assumed. Flagging in case that judgment is wrong — the GIF assets
+  (`x{1,2,3}_sigma_boss.gif`) already exist locally; only `beaten.png`
+  would need copying.
+- **Global "Miscellaneous" panel.** A separate reference component,
+  combining multiworld-scope stats across all 3 titles at once (combined
+  sigma-key/life-up/energy-up counts using its `M`-prefixed ids, a
+  current-title indicator, and per-title enabled/disabled dimming based on
+  which titles this seed actually randomizes). The dimming piece is the
+  one genuinely useful part — it'd grey out a title panel entirely if this
+  seed doesn't include it — but it needs a new data channel: the
+  randomized-games bits (`addrMultiworldInfo`, read locally in
+  `lua/share_info.lua`'s `readRandomizedGames`) are never currently sent
+  to the room/worker, only used for this project's own hint-pointer logic.
+  Adding this is real scope (Lua → worker → client plumbing), not a
+  client-only rendering change like everything else in this spec — flagged
+  as a separate future feature rather than folded into this pass.
+- **`ItemIconTextLine`/acquisition ticker.** The reference has a scrolling
+  "recently acquired items" log. This project already has an equivalent —
+  `pages/tracker/event_feed.html` — just as its own separate page instead
+  of embedded in the grid. Not a gap, just organized differently.
