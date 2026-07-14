@@ -224,9 +224,9 @@ other icon cell — not double-applied.)
 `isArmorSlotOwned(idPair)` (already implemented, checks either the Part or
 Chip id) decides each part image's `done` class, exactly the same
 ownership rule already used for today's 4-icon armor row — only the
-rendering changes, not the ownership logic. The 4 subtank icons keep
-rendering as their own separate small icons immediately after the armor
-cell in the same grid row, unchanged from today.
+rendering changes, not the ownership logic. Subtank icons no longer render
+next to the armor cell — as covered in design section 4, they're folded
+into the gauge row as a single count cell instead.
 
 ### 4. Sigma-key/subtank/HP/Energy counts, buster tiers, X2 Zero armor, X3 ride armor & sub-bosses
 
