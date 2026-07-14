@@ -78,12 +78,12 @@ Two things from the reference are deliberately **not** being copied:
    X + owned parts layered on top) instead of four separate small icons.
 4. The grid also surfaces every other item category the randomizer tracks
    that this project's own `mergedItems` already carries but the grid
-   never rendered: buster ammo/attack/fire-rate/dash-shot/charge tiers (all
-   3 titles), X2's Zero armor parts, and X3's ride armor + sub-boss kills.
-   `mergedItems` is a full, unconditional 96-byte OR-merge in
-   `checksSeen+items` mode (see `worker/src/room.js`'s `mergeIncomingItems`)
-   — every one of these item ids is already flowing into `sync_relay.js`
-   today, just not drawn.
+   never rendered: permanent life-up/energy-up upgrade counts, buster
+   ammo/attack/fire-rate/dash-shot/charge tiers (all 3 titles), X2's Zero
+   armor parts, and X3's ride armor + sub-boss kills. `mergedItems` is a
+   full, unconditional 96-byte OR-merge in `checksSeen+items` mode (see
+   `worker/src/room.js`'s `mergeIncomingItems`) — every one of these item
+   ids is already flowing into `sync_relay.js` today, just not drawn.
 
 ## Design
 
@@ -143,8 +143,12 @@ framework):
      icon + the game-clear check icon (count varies 9-11 by title since
      X2/X3 have more sigma keys than X1 — the grid simply wraps to a
      second row for those titles; no special-casing needed).
-  4. The 5 buster-tier gauges (ammo/attack/fire-rate/dash-shot/charge —
-     see design section 4 below), common to all 3 titles.
+  4. 7 gauge cells common to all 3 titles: life-up count, energy-up count,
+     then the 5 buster-tier gauges (ammo/attack/fire-rate/dash-shot/charge)
+     — see design section 4 below. Same order the reference tracker uses
+     (`hp`, `wp`, then `b`/`ba`/`br`/`bd`/`bc`), just without its `sigma`/
+     `e` slots, which this project already shows as individual per-key/
+     per-subtank icons elsewhere in the grid.
   5. Title-specific extras, only rendered for the title that has them: X2
      gets 3 Zero-armor icons; X3 gets 3 sub-boss icons + 4 ride-armor
      icons (7 cells). X1 has no 5th grid.
@@ -219,7 +223,7 @@ rendering changes, not the ownership logic. The 4 subtank icons keep
 rendering as their own separate small icons immediately after the armor
 cell in the same grid row, unchanged from today.
 
-### 4. Buster tiers, X2 Zero armor, X3 ride armor & sub-bosses
+### 4. HP/Energy upgrade counts, buster tiers, X2 Zero armor, X3 ride armor & sub-bosses
 
 `item_id_map.js` already has ids for all of these (confirmed by grep — none
 of this needs new IDs invented). 8 icon files needed copying from
@@ -230,34 +234,41 @@ buster-tier icons, shared across all 3 titles, same as the reference's own
 `bImgObject` reuse) and `x2_zero_head.ico`/`x2_zero_body.ico`/
 `x2_zero_foot.ico`. Ride armor and sub-boss icons needed no copying —
 `x3_ridearmor_{f,h,k,n}.png` and `x3_subbosses_{bff,mbb,vava}.png` already
-existed in `pages/tracker/assets/` from earlier work.
+existed in `pages/tracker/assets/` from earlier work. The life-up/energy-up
+icons need no copying either — `heart.png`/`energy.png` (the reference's
+own `hp`/`wp` icons) already exist in `pages/tracker/assets/`.
 
-Unlike every other cell so far (boolean owned/not-owned), a buster tier is
-a **count**: how many of that tier's items are owned, out of the tier's
-total. This reuses the exact same icon+centered-outlined-number technique
-already planned for the deaths/IFG counters in section 2 — same
-`.hud-number` class, just `${owned.length}/${ids.length}` as the text
-instead of a running total. No new CSS needed beyond what section 2
-already defines.
+Unlike every boolean cell so far (owned or not), a life-up/energy-up count
+or a buster tier is a **count**: how many of that category's items are
+owned, out of the category's total. This reuses the exact same
+icon+centered-outlined-number technique already planned for the deaths/IFG
+counters in section 2 — same `.hud-number` class, just
+`${owned.length}/${ids.length}` as the text instead of a running total. No
+new CSS needed beyond what section 2 already defines.
 
 Labels are hardcoded plain-English strings directly in the new layout data
 (see below), not routed through `item_names_en.js`/`ja`/`zhtw` — this
 project's translation tables are for player-facing event-feed text about
-items obtained during play, and translating 8 new tooltip-only labels
-per language for a hover-title on this one grid isn't part of what was
-asked; the existing fallback (untranslated ids show their raw code as a
-tooltip) already covers ids without a translation, so this isn't a new
-class of gap.
+items obtained during play, and translating this section's new
+tooltip-only labels into 3 languages for a hover-title on this one grid
+isn't part of what was asked; the existing fallback (untranslated ids show
+their raw code as a tooltip) already covers ids without a translation, so
+this isn't a new class of gap.
 
 New fields added to each title's entry in `team_progress_layout.js`:
 
 ```js
-// Common to all 3 titles. ids per grep of item_id_map.js -- 1ItBusterAmmo1-5,
-// 1ItBusterAttack100/150, 1ItBusterFireRate3/4/5/6/30/60,
-// 1ItBusterDashShot1/Unlimited, 1ItCharge75/100/125/150 (and the 2It.../3It...
-// equivalents for X2/X3). Displayed as "<owned count>/<tier size>" on one
-// shared icon per tier, not as individual booleans.
-busterGauges: [
+// Common to all 3 titles, in the same order the reference tracker's own
+// Common.tsx renders them (hp, wp, then the 5 buster tiers). ids per grep
+// of item_id_map.js -- 1ItLifeUp1-8/1ItLifeUpD1-6 (hp), 1ItEnergyUp1-14
+// (wp), 1ItBusterAmmo1-5, 1ItBusterAttack100/150,
+// 1ItBusterFireRate3/4/5/6/30/60, 1ItBusterDashShot1/Unlimited,
+// 1ItCharge75/100/125/150 (and the 2It.../3It... equivalents for X2/X3).
+// Each displayed as "<owned count>/<category size>" on one shared icon,
+// not as individual booleans.
+gauges: [
+  { file: "assets/heart.png", label: "Life-up upgrades", ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] },
+  { file: "assets/energy.png", label: "Energy-up upgrades", ids: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29] },
   { file: "assets/b.png", label: "Buster ammo capacity", ids: [96, 97, 98, 99, 100] },
   { file: "assets/ba.png", label: "Buster attack power", ids: [101, 102] },
   { file: "assets/br.png", label: "Buster fire rate", ids: [104, 105, 106, 107, 108, 109] },
@@ -266,12 +277,13 @@ busterGauges: [
 ],
 ```
 
-(X2's `busterGauges` uses ids `[352-356]`/`[357,358]`/`[360-365]`/
-`[366,367]`/`[368-371]`; X3's uses `[608-612]`/`[613,614]`/`[616-621]`/
-`[622,623]`/`[624-627]` — same 5-entry shape, same icon files, only the
-`ids` arrays change per title.)
+(X2's `gauges` uses hp ids `[256-269]`, wp ids `[272-285]`, then buster ids
+`[352-356]`/`[357,358]`/`[360-365]`/`[366,367]`/`[368-371]`; X3's uses hp
+ids `[512-525]`, wp ids `[528-541]`, then buster ids `[608-612]`/
+`[613,614]`/`[616-621]`/`[622,623]`/`[624-627]` — same 7-entry shape, same
+icon files, only the `ids` arrays change per title.)
 
-X2 only, appended after `busterGauges`:
+X2 only, appended after `gauges`:
 
 ```js
 // 2ItZeroFHead/2ItZeroBody/2ItZeroFoot -- boolean, same isItemOwned check
@@ -283,7 +295,7 @@ zero: [
 ],
 ```
 
-X3 only, appended after `busterGauges`:
+X3 only, appended after `gauges`:
 
 ```js
 // 3ItRideArmorF/H/K/N -- boolean.
@@ -307,7 +319,7 @@ render icon + `.hud-number` showing `${count}/${ids.length}`) and
 `renderOwnedIconCell({id, file, label})` (boolean, same `makeGridIcon`
 pattern already used for weapons/subtanks, just reading `file`/`label`
 straight from the data instead of a `getIconInfoForId` lookup). The 4th
-grid renders `busterGauges` through the gauge helper; the 5th grid (when
+grid renders `gauges` through the gauge helper; the 5th grid (when
 present) renders `zero` or `rideArmor`+`subbosses` through the boolean
 helper.
 
@@ -325,8 +337,9 @@ helper.
   drive the status dot's color from existing connection state).
 - `pages/tracker/team_progress_layout.js` — existing armor id-pair
   ordering is unchanged (already fits the overlay technique directly);
-  adds the new `busterGauges` (all titles) and `zero` (X2)/`rideArmor`+
-  `subbosses` (X3) fields described in design section 4.
+  adds the new `gauges` (all titles: hp/wp counts + 5 buster tiers) and
+  `zero` (X2)/`rideArmor`+`subbosses` (X3) fields described in design
+  section 4.
 - `pages/tracker/assets/` — 8 new files copied from the reference
   tracker's own asset folder (already done as part of this design pass):
   `b.png`, `ba.png`, `br.png`, `bd.png`, `bc.png`, `x2_zero_head.ico`,
@@ -339,12 +352,13 @@ helper.
   mergedItems, totalDeaths, totalIfgUses) is unchanged. Buster/Zero/ride
   -armor/sub-boss ids are already inside the existing `mergedItems` byte
   array; nothing server- or Lua-side needs to change to expose them.
-- Not reproducing the reference tracker's per-language translation tables,
-  or its HP-up/energy-up permanent stat counts (`hp`/`wp` in its
-  `imgSourceObject`) — those weren't asked for. They're the same kind of
-  "already in `mergedItems`, just not drawn" data as section 4's
-  additions, so they'd follow the same pattern if wanted later, but adding
-  them now would be scope beyond what was requested.
+- Not reproducing the reference tracker's per-language translation tables
+  for the new gauge/boolean cells' tooltips (see design section 4's
+  rationale) or its `sigma`/`e` count-cell treatment — this project
+  already shows sigma keys and subtanks as individual per-key/per-subtank
+  icons elsewhere in the grid, which is more granular than the
+  reference's single count cell, so those two are intentionally left as
+  -is rather than replaced with a count.
 - No automated tests — consistent with this project's existing convention
   that `pages/tracker/*` (browser-only UI) has no test suite; verified via
   manual browser testing instead.
