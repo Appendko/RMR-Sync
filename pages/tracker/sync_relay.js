@@ -189,6 +189,24 @@ function renderProgressGrid() {
     }
     section.appendChild(gaugeRow);
 
+    if (layout.zeroIds || layout.rideArmorIds || layout.subbossCheckIds) {
+      const extraRow = document.createElement("div");
+      extraRow.className = "icon-grid";
+      for (const itemId of layout.zeroIds || []) {
+        const info = getIconInfoForId(itemId);
+        extraRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+      }
+      for (const itemId of layout.rideArmorIds || []) {
+        const info = getIconInfoForId(itemId);
+        extraRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
+      }
+      for (const checkId of layout.subbossCheckIds || []) {
+        const info = getCheckIconInfoForId(checkId);
+        extraRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+      }
+      section.appendChild(extraRow);
+    }
+
     panel.appendChild(section);
   }
 

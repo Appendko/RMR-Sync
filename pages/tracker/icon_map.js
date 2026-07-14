@@ -91,8 +91,8 @@ function getIconInfo(idString) {
 
   const zeroPartMatch = idString.match(/^2ItZero(Head|FHead|Body|Foot)$/);
   if (zeroPartMatch) {
-    const part = zeroPartMatch[1] === "FHead" ? "head" : PART_ASSET_NAMES[zeroPartMatch[1]] || zeroPartMatch[1].toLowerCase();
-    return { file: `assets/x2_x_${part}.png`, label };
+    const part = zeroPartMatch[1] === "FHead" ? "head" : zeroPartMatch[1].toLowerCase();
+    return { file: `assets/x2_zero_${part}.ico`, label };
   }
 
   return { file: GENERIC_ICON, label };

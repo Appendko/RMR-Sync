@@ -46,6 +46,7 @@ var TEAM_PROGRESS_LAYOUT = {
       { file: "assets/bd.png", label: "Dash shot capacity", ids: [366, 367] },
       { file: "assets/bc.png", label: "Charge speed", ids: [368, 369, 370, 371] },
     ],
+    zeroIds: [313, 314, 312], // 2ItZeroFHead, 2ItZeroBody, 2ItZeroFoot -- head/body/foot order
     superWeaponId: 336, // Shoryuken
     gameClearCheckId: 901,
   },
@@ -68,6 +69,8 @@ var TEAM_PROGRESS_LAYOUT = {
       { file: "assets/bd.png", label: "Dash shot capacity", ids: [622, 623] },
       { file: "assets/bc.png", label: "Charge speed", ids: [624, 625, 626, 627] },
     ],
+    rideArmorIds: [599, 598, 597, 596], // 3ItRideArmorF/H/K/N, F/H/K/N order
+    subbossCheckIds: [750, 751, 761], // 3ChVajurilaFF, 3ChMandarelaBB, 3ChVAClear
     superWeaponId: 592, // Z-Saber
     gameClearCheckId: 902,
   },
