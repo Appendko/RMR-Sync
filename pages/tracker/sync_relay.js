@@ -42,6 +42,8 @@ function isArmorSlotOwned(idPair) {
 }
 
 function makeGridIcon(file, label, done) {
+  const cell = document.createElement("div");
+  cell.className = "icon-cell";
   const img = document.createElement("img");
   img.src = file;
   img.alt = label;
@@ -49,7 +51,23 @@ function makeGridIcon(file, label, done) {
   if (done) {
     img.classList.add("done");
   }
-  return img;
+  cell.appendChild(img);
+  return cell;
+}
+
+function makeGaugeIcon(file, label, text) {
+  const cell = document.createElement("div");
+  cell.className = "gauge-cell";
+  const img = document.createElement("img");
+  img.src = file;
+  img.alt = label;
+  img.title = label;
+  cell.appendChild(img);
+  const number = document.createElement("span");
+  number.className = "hud-number";
+  number.textContent = text;
+  cell.appendChild(number);
+  return cell;
 }
 
 function renderProgressGrid() {
@@ -70,7 +88,7 @@ function renderProgressGrid() {
     section.appendChild(heading);
 
     const bossRow = document.createElement("div");
-    bossRow.className = "icon-row";
+    bossRow.className = "icon-grid";
     const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
     bossRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
     for (const checkId of layout.bossCheckIds) {
@@ -80,7 +98,7 @@ function renderProgressGrid() {
     section.appendChild(bossRow);
 
     const weaponRow = document.createElement("div");
-    weaponRow.className = "icon-row";
+    weaponRow.className = "icon-grid";
     for (const itemId of layout.weaponIds) {
       const info = getIconInfoForId(itemId);
       weaponRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
@@ -90,7 +108,7 @@ function renderProgressGrid() {
     section.appendChild(weaponRow);
 
     const armorRow = document.createElement("div");
-    armorRow.className = "icon-row";
+    armorRow.className = "icon-grid";
     for (const idPair of layout.armor) {
       const info = getIconInfoForId(idPair[0]);
       armorRow.appendChild(makeGridIcon(info.file, info.label, isArmorSlotOwned(idPair)));
@@ -102,7 +120,7 @@ function renderProgressGrid() {
     section.appendChild(armorRow);
 
     const sigmaRow = document.createElement("div");
-    sigmaRow.className = "icon-row";
+    sigmaRow.className = "icon-grid";
     for (const checkId of layout.sigmaCheckIds) {
       const info = getCheckIconInfoForId(checkId);
       sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
@@ -119,21 +137,8 @@ function renderProgressGrid() {
   const allClearInfo = getCheckIconInfoForId(ALL_CLEAR_CHECK_ID);
   miscRow.appendChild(makeGridIcon(allClearInfo.file, allClearInfo.label, isTeamCheckDone(ALL_CLEAR_CHECK_ID)));
 
-  const deathsIcon = document.createElement("img");
-  deathsIcon.src = "assets/deaths.png";
-  deathsIcon.alt = "Deaths";
-  miscRow.appendChild(deathsIcon);
-  const deathsCount = document.createElement("span");
-  deathsCount.textContent = String(totalDeaths);
-  miscRow.appendChild(deathsCount);
-
-  const ifgIcon = document.createElement("img");
-  ifgIcon.src = "assets/igf.png";
-  ifgIcon.alt = "IFG uses";
-  miscRow.appendChild(ifgIcon);
-  const ifgCount = document.createElement("span");
-  ifgCount.textContent = String(totalIfgUses);
-  miscRow.appendChild(ifgCount);
+  miscRow.appendChild(makeGaugeIcon("assets/deaths.png", "Deaths", String(totalDeaths)));
+  miscRow.appendChild(makeGaugeIcon("assets/igf.png", "IFG uses", String(totalIfgUses)));
 
   panel.appendChild(miscRow);
 }

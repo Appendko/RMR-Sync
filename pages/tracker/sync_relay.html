@@ -4,17 +4,48 @@
 <meta charset="utf-8">
 <title>RMR Sync — Relay</title>
 <style>
-  body { font-family: sans-serif; max-width: 640px; margin: 2em auto; }
-  #status { white-space: pre-wrap; background: #f0f0f0; padding: 1em; border-radius: 4px; }
+  :root {
+    --bg: #14141a;
+    --panel-bg: #1c1c24;
+    --panel-border: #ffffff;
+    --text: #e8e8ec;
+    --text-dim: #9a9aa4;
+  }
+  body {
+    font-family: sans-serif;
+    max-width: 640px;
+    margin: 2em auto;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #status { white-space: pre-wrap; background: #262630; padding: 1em; border-radius: 4px; }
   button { font-size: 1em; padding: 0.5em 1em; margin-right: 0.5em; }
-  .title-panel { margin: 0.75em 0; border: 1px solid #ccc; border-radius: 6px; padding: 0.6em 0.8em; }
-  .title-panel h3 { display: flex; align-items: center; gap: 0.4em; font-size: 1.05em; margin: 0 0 0.5em; }
+
+  .title-panel { margin: 0.75em 0; border: 2px solid var(--panel-border); border-radius: 5px; padding: 0.6em 0.8em; background: var(--panel-bg); }
+  .title-panel h3 { display: flex; align-items: center; gap: 0.4em; font-size: 1.05em; margin: 0 0 0.5em; color: var(--text); }
   .title-panel h3 img { width: 24px; height: 24px; }
-  .icon-row { display: flex; flex-wrap: wrap; gap: 0.25em; margin-bottom: 0.35em; }
-  .icon-row img { width: 28px; height: 28px; image-rendering: pixelated; filter: grayscale(100%) brightness(0.55); opacity: 0.45; }
-  .icon-row img.done { filter: none; opacity: 1; }
-  .misc-row { display: flex; align-items: center; gap: 1.5em; margin-top: 0.5em; font-size: 1.05em; }
-  .misc-row img { width: 24px; height: 24px; image-rendering: pixelated; }
+
+  .icon-grid { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; margin-bottom: 0.35em; }
+
+  .icon-cell { padding: 6%; aspect-ratio: 1; }
+  .icon-cell img { width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; image-rendering: pixelated; filter: grayscale(100%) brightness(0.55); opacity: 0.45; transition: filter 0.4s ease, opacity 0.4s ease; }
+  .icon-cell img.done { filter: none; opacity: 1; }
+
+  .gauge-cell { position: relative; padding: 6%; aspect-ratio: 1; }
+  .gauge-cell img { width: 100%; height: 100%; object-fit: contain; display: block; image-rendering: pixelated; }
+  .hud-number {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", ui-monospace, monospace; font-weight: 700; font-size: 0.8em; color: #000;
+    text-shadow:
+      2px 0 0 #fff, 1.76px 0.96px 0 #fff, 1.08px 1.68px 0 #fff,
+      0.14px 1.99px 0 #fff, -0.83px 1.82px 0 #fff, -1.6px 1.2px 0 #fff,
+      -1.98px 0.28px 0 #fff, -1.87px -0.7px 0 #fff, -1.31px -1.51px 0 #fff,
+      -0.42px -1.96px 0 #fff, 0.57px -1.92px 0 #fff, 1.42px -1.41px 0 #fff,
+      1.92px -0.56px 0 #fff;
+  }
+
+  .misc-row { display: flex; align-items: center; gap: 1em; margin-top: 0.5em; }
+  .misc-row .icon-cell, .misc-row .gauge-cell { width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
 </style>
 </head>
 <body>
