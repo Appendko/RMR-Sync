@@ -76,6 +76,14 @@ var TEAM_PROGRESS_LAYOUT = {
   },
 };
 
+// Wire each title's subtank gauge to read from the single source of truth
+// (subtankIds) instead of duplicating the ids in the gauge definition.
+for (const title of [1, 2, 3]) {
+  const layout = TEAM_PROGRESS_LAYOUT[title];
+  const subtankGauge = layout.gauges.find((g) => g.label === "Subtanks collected");
+  subtankGauge.ids = layout.subtankIds;
+}
+
 // ref/aaa/boot.lua's own "all 3 titles cleared" milestone (lua/share_info.lua's
 // cCheckIdGameClearAll) -- shown once, globally, not per-title.
 var ALL_CLEAR_CHECK_ID = 903;
