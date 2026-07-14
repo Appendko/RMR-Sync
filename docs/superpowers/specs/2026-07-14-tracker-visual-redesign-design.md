@@ -305,45 +305,64 @@ shape, same icon files, only the `ids` arrays change per title. The
 subtank `ids` are exactly this title's existing `subtankIds` array —
 `gauges` reads the same array, it isn't a new/duplicate source of truth.)
 
-X2 only, appended after `gauges`:
+**Discovered while re-checking `pages/tracker/icon_map.js` and `check_lookup.js`
+against this section:** the boolean cells (Zero armor, ride armor, sub-bosses)
+don't need any hardcoded `{id, file, label}` data at all — the existing
+per-item/per-check icon lookups already resolve correctly (or, in one case,
+almost correctly), so they reuse the exact same rendering pattern already
+used for weapons/bosses elsewhere in `renderProgressGrid()`, rather than a
+new parallel data shape:
 
-```js
-// 2ItZeroFHead/2ItZeroBody/2ItZeroFoot -- boolean, same isItemOwned check
-// as any other single-item icon (not a gauge).
-zero: [
-  { id: 313, file: "assets/x2_zero_head.ico", label: "Zero head armor" },
-  { id: 314, file: "assets/x2_zero_body.ico", label: "Zero body armor" },
-  { id: 312, file: "assets/x2_zero_foot.ico", label: "Zero foot armor" },
-],
-```
+- **Ride armor** — `getIconInfoForId(599)` etc. already resolves correctly
+  today via `icon_map.js`'s existing `rideArmorMatch` regex (`3ItRideArmorF`
+  → `assets/x3_ridearmor_f.png`, confirmed by reading the regex). X3 gets a
+  plain id array, ordered F/H/K/N to match the reference:
+  `rideArmorIds: [599, 598, 597, 596]`. Rendered exactly like `weaponIds`
+  today: `for (const id of layout.rideArmorIds) { const info =
+  getIconInfoForId(id); ...makeGridIcon(info.file, info.label,
+  isItemOwned(id)); }`.
+- **Sub-bosses** — re-examining this, the *check* ids for these fights
+  (`750`/`3ChVajurilaFF`, `751`/`3ChMandarelaBB`, `761`/`3ChVAClear` — found
+  by grepping `check_id_map.js`, not the item ids `573-575` first drafted
+  above) are the better fit: `check_lookup.js`'s
+  `CHECK_BOSS_PORTRAIT_FILE` already maps exactly these 3 ids to
+  `x3_subbosses_bff.png`/`mbb.png`/`vava.png` (the same portrait art
+  originally hand-picked for this section, just already wired up on the
+  check side). Using the check ids also matches how every other
+  boss-completion cell in this grid already works (boolean via
+  `isTeamCheckDone`, not an item flag) — X3 gets `subbossCheckIds: [750,
+  751, 761]`, rendered exactly like `bossCheckIds` today via
+  `getCheckIconInfoForId`/`isTeamCheckDone`. The item ids `573-575` aren't
+  used anywhere in this design.
+- **X2 Zero armor** — `getIconInfoForId(313)` etc. currently resolves
+  *incorrectly*: `icon_map.js`'s `zeroPartMatch` branch (line ~92) borrows
+  X's own body-part sprites (`assets/x2_x_head.png` etc. — the same files
+  the armor overlay uses) as a placeholder, predating this session's
+  addition of the real `x2_zero_{head,body,foot}.ico` assets. Fixing that
+  branch to point at the real assets is one small, self-contained, clearly
+  -correct change (benefits any other place these ids ever render, e.g. the
+  event feed, not just this grid):
 
-X3 only, appended after `gauges`:
+  ```js
+  const zeroPartMatch = idString.match(/^2ItZero(Head|FHead|Body|Foot)$/);
+  if (zeroPartMatch) {
+    const part = zeroPartMatch[1] === "FHead" ? "head" : zeroPartMatch[1].toLowerCase();
+    return { file: `assets/x2_zero_${part}.ico`, label };
+  }
+  ```
 
-```js
-// 3ItRideArmorF/H/K/N -- boolean.
-rideArmor: [
-  { id: 599, file: "assets/x3_ridearmor_f.png", label: "Ride Armor F (Frog)" },
-  { id: 598, file: "assets/x3_ridearmor_h.png", label: "Ride Armor H (Hawk)" },
-  { id: 597, file: "assets/x3_ridearmor_k.png", label: "Ride Armor K (Kangaroo)" },
-  { id: 596, file: "assets/x3_ridearmor_n.png", label: "Ride Armor N (Chimera)" },
-],
-// 3ItKeyVajurila/3ItKeyMandarela/3ItKeyVava -- boolean, defeat flags.
-subbosses: [
-  { id: 573, file: "assets/x3_subbosses_bff.png", label: "Vajurila FF" },
-  { id: 574, file: "assets/x3_subbosses_mbb.png", label: "Mandarela BB" },
-  { id: 575, file: "assets/x3_subbosses_vava.png", label: "Vava" },
-],
-```
+  With that fix, X2 just needs a plain id array too —
+  `zeroIds: [313, 314, 312]` (head/body/foot, matching the reference's own
+  order) — rendered identically to `rideArmorIds` above.
 
-`renderProgressGrid()` gets two new small helpers reused across titles:
+`renderProgressGrid()` gets exactly one new helper:
 `renderGaugeCell({file, label, ids})` (count `ids.filter(isItemOwned).length`,
-render icon + `.hud-number` showing `${count}/${ids.length}`) and
-`renderOwnedIconCell({id, file, label})` (boolean, same `makeGridIcon`
-pattern already used for weapons/subtanks, just reading `file`/`label`
-straight from the data instead of a `getIconInfoForId` lookup). The 4th
-grid renders `gauges` through the gauge helper; the 5th grid (when
-present) renders `zero` or `rideArmor`+`subbosses` through the boolean
-helper.
+render icon + `.hud-number` showing `${count}/${ids.length}`), used only for
+the 4th grid's `gauges`. The 5th grid (when present) reuses the existing
+boss-row/weapon-row rendering pattern verbatim for `zeroIds`/`rideArmorIds`
+(via `getIconInfoForId`/`isItemOwned`) and `subbossCheckIds` (via
+`getCheckIconInfoForId`/`isTeamCheckDone`) — no new helper needed for any of
+the three.
 
 ## Files changed
 
@@ -353,15 +372,21 @@ helper.
   container plus the corner toggle button.
 - `pages/tracker/sync_relay.js` — `renderProgressGrid()` rewritten to
   build 4-5 grids per title (rather than four flat icon-rows) with the
-  armor composite cell and the new gauge/boolean-icon helpers from design
-  section 4; new small module for the collapse-toggle behavior (read/write
-  `rmrSyncRelayPanelCollapsed`, wire the "Hide setup"/corner-icon buttons,
-  drive the status dot's color from existing connection state).
+  armor composite cell, the new `renderGaugeCell` helper, and the 5th
+  grid's boolean cells reusing the existing boss-row/weapon-row rendering
+  inline (see design section 4); new small module for the collapse-toggle
+  behavior (read/write `rmrSyncRelayPanelCollapsed`, wire the "Hide
+  setup"/corner-icon buttons, drive the status dot's color from existing
+  connection state).
 - `pages/tracker/team_progress_layout.js` — existing armor id-pair
   ordering and `subtankIds` are unchanged (the latter now also feeds the
   gauge row instead of individual icons); adds the new `gauges` (all
-  titles: sigma-key/subtank/hp/wp counts + 5 buster tiers) and `zero`
-  (X2)/`rideArmor`+`subbosses` (X3) fields described in design section 4.
+  titles: sigma-key/subtank/hp/wp counts + 5 buster tiers), `zeroIds`
+  (X2), and `rideArmorIds`/`subbossCheckIds` (X3) fields described in
+  design section 4.
+- `pages/tracker/icon_map.js` — one-branch fix so `2ItZeroHead`/`FHead`/
+  `Body`/`Foot` resolve to the real `x2_zero_*.ico` assets instead of
+  borrowing X's own body-part sprites (see design section 4).
 - `pages/tracker/assets/` — 8 new files copied from the reference
   tracker's own asset folder (already done as part of this design pass):
   `b.png`, `ba.png`, `br.png`, `bd.png`, `bc.png`, `x2_zero_head.ico`,
