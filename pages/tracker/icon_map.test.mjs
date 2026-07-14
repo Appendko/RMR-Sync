@@ -105,10 +105,10 @@ test("maps ItStageVaried codes to the matching boss weapon asset", () => {
   assert.equal(getIconInfo("MItStageVariedBN").file, "assets/x1_weapon_fm.png");
 });
 
-test("maps X2 Zero parts to the X armor-part icons", () => {
-  assert.equal(getIconInfo("2ItZeroFoot").file, "assets/x2_x_foot.png");
-  assert.equal(getIconInfo("2ItZeroFHead").file, "assets/x2_x_head.png");
-  assert.equal(getIconInfo("2ItZeroBody").file, "assets/x2_x_body.png");
+test("maps X2 Zero parts to the real Zero-armor icons", () => {
+  assert.equal(getIconInfo("2ItZeroFoot").file, "assets/x2_zero_foot.ico");
+  assert.equal(getIconInfo("2ItZeroFHead").file, "assets/x2_zero_head.ico");
+  assert.equal(getIconInfo("2ItZeroBody").file, "assets/x2_zero_body.ico");
 });
 
 test("maps MItHadouken alongside the existing 1ItHadouken rule", () => {
