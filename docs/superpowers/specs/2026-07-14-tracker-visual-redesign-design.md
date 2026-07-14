@@ -56,7 +56,11 @@ Two things from the reference are deliberately **not** being copied:
 - It targets a transparent background for OBS compositing over gameplay
   footage. `sync_relay.html` is a normal browser tab, not a stream overlay,
   so it gets a dark solid background instead of transparency — everything
-  else (borders, grid, icon treatment) carries over unchanged.
+  else (borders, grid, icon treatment) carries over unchanged. If this page
+  is later added as an OBS Browser Source, OBS's own per-source "Custom
+  CSS" field can override `body`'s background to transparent for
+  compositing, without needing a second variant of this page — not part of
+  this redesign, but worth remembering when that's set up.
 - Its "unlock" animation (a spinning/scaling padlock icon via the
   `solid-motionone` library) is not reproduced — that's a JS animation
   library dependency for a flourish this project doesn't otherwise have.
