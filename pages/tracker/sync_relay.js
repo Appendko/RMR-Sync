@@ -136,6 +136,33 @@ function renderGaugeCell(gauge) {
   return makeGaugeIcon(gauge.file, gauge.label, `${count}/${gauge.ids.length}`);
 }
 
+const SHARED_GAUGE_DEFS = [
+  { category: "sigmaKey", file: "assets/sigma.png", label: "Sigma keys collected (shared)" },
+  { category: "lifeUp", file: "assets/heart.png", label: "Life-up upgrades (shared)" },
+  { category: "energyUp", file: "assets/energy.png", label: "Energy-up upgrades (shared)" },
+  { category: "subTank", file: "assets/etank.png", label: "Subtanks collected (shared)" },
+];
+
+function renderCommonBlock() {
+  const section = document.createElement("div");
+  section.className = "title-panel";
+  const row = document.createElement("div");
+  row.className = "icon-grid";
+  const allClearInfo = getCheckIconInfoForId(ALL_CLEAR_CHECK_ID);
+  row.appendChild(makeGridIcon(allClearInfo.file, allClearInfo.label, isTeamCheckDone(ALL_CLEAR_CHECK_ID)));
+  for (const shared of SHARED_GAUGE_DEFS) {
+    if (!shareFlags[shared.category]) continue;
+    const ids = [1, 2, 3].flatMap((title) =>
+      TEAM_PROGRESS_LAYOUT[title].gauges.find((g) => g.category === shared.category).ids
+    );
+    row.appendChild(renderGaugeCell({ file: shared.file, label: shared.label, ids }));
+  }
+  row.appendChild(makeGaugeIcon("assets/deaths.png", "Deaths", String(totalDeaths)));
+  row.appendChild(makeGaugeIcon("assets/igf.png", "IFG uses", String(totalIfgUses)));
+  section.appendChild(row);
+  return section;
+}
+
 function renderProgressGrid() {
   const panel = document.getElementById("progressPanel");
   panel.innerHTML = "";
@@ -180,6 +207,7 @@ function renderProgressGrid() {
     const gaugeRow = document.createElement("div");
     gaugeRow.className = "icon-grid";
     for (const gauge of layout.gauges) {
+      if (gauge.category && shareFlags[gauge.category]) continue; // shown once in the Common block instead
       gaugeRow.appendChild(renderGaugeCell(gauge));
     }
     section.appendChild(gaugeRow);
@@ -205,15 +233,7 @@ function renderProgressGrid() {
     panel.appendChild(section);
   }
 
-  const miscRow = document.createElement("div");
-  miscRow.className = "misc-row";
-  const allClearInfo = getCheckIconInfoForId(ALL_CLEAR_CHECK_ID);
-  miscRow.appendChild(makeGridIcon(allClearInfo.file, allClearInfo.label, isTeamCheckDone(ALL_CLEAR_CHECK_ID)));
-
-  miscRow.appendChild(makeGaugeIcon("assets/deaths.png", "Deaths", String(totalDeaths)));
-  miscRow.appendChild(makeGaugeIcon("assets/igf.png", "IFG uses", String(totalIfgUses)));
-
-  panel.appendChild(miscRow);
+  panel.appendChild(renderCommonBlock());
 }
 
 function applyProgressState(msg) {
