@@ -146,18 +146,10 @@ function renderProgressGrid() {
     const section = document.createElement("div");
     section.className = "title-panel";
 
-    const heading = document.createElement("h3");
-    const titleIcon = document.createElement("img");
-    titleIcon.src = layout.titleIcon;
-    titleIcon.alt = `X${title}`;
-    heading.appendChild(titleIcon);
-    heading.appendChild(document.createTextNode(`Rockman X${title}`));
-    section.appendChild(heading);
-
     const bossRow = document.createElement("div");
     bossRow.className = "icon-grid";
-    const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
-    bossRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
+    const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
+    bossRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
     for (const checkId of layout.bossCheckIds) {
       const info = getCheckIconInfoForId(checkId);
       bossRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
@@ -175,14 +167,14 @@ function renderProgressGrid() {
 
     const sigmaRow = document.createElement("div");
     sigmaRow.className = "icon-grid";
+    const superInfo = getIconInfoForId(layout.superWeaponId);
+    sigmaRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
+    const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
+    sigmaRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
     for (const checkId of layout.sigmaCheckIds) {
       const info = getCheckIconInfoForId(checkId);
       sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
     }
-    const superInfo = getIconInfoForId(layout.superWeaponId);
-    sigmaRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
-    const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
-    sigmaRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
     section.appendChild(sigmaRow);
 
     const gaugeRow = document.createElement("div");
