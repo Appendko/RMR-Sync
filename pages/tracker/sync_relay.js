@@ -133,7 +133,7 @@ function makeArmorOverlay(title, layout) {
 
 function renderGaugeCell(gauge) {
   const count = gauge.ids.filter(isItemOwned).length;
-  return makeGaugeIcon(gauge.file, gauge.label, `${count}/${gauge.ids.length}`);
+  return makeGaugeIcon(gauge.file, gauge.label, `${count}`);
 }
 
 const SHARED_GAUGE_DEFS = [
