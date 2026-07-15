@@ -348,7 +348,7 @@ local function issueRequest()
         workerUrl = cfg.worker_url,
         roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
-        sync = { checksSeen = readChecksSeen(), items = readItems(), epoch = knownEpoch, shareFlags = shareFlags },
+        sync = { checksSeen = readChecksSeen(), items = readItems(), epoch = knownEpoch, shareFlags = shareFlags, randomizedGames = randomizedGames },
         events = pendingEvents,
     }, gameDir)
 end

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags, isValidGameClearTime, isValidDeathDelta, isValidIfgDelta } from "../src/validation.js";
+import { isValidMode, isValidChecksSeenArray, isValidItemsArray, validateEventBody, isValidAdminSecret, isValidEpoch, isValidShareFlags, isValidRandomizedGames, isValidGameClearTime, isValidDeathDelta, isValidIfgDelta } from "../src/validation.js";
 
 describe("isValidMode", () => {
   it("accepts the three known modes", () => {
@@ -261,5 +261,31 @@ describe("isValidShareFlags", () => {
     expect(isValidShareFlags(null)).toBe(false);
     expect(isValidShareFlags([])).toBe(false);
     expect(isValidShareFlags("nope")).toBe(false);
+  });
+});
+
+describe("isValidRandomizedGames", () => {
+  it("accepts undefined (older Lua clients that predate this field)", () => {
+    expect(isValidRandomizedGames(undefined)).toBe(true);
+  });
+
+  it("accepts a 3-element boolean array", () => {
+    expect(isValidRandomizedGames([true, true, true])).toBe(true);
+    expect(isValidRandomizedGames([true, false, true])).toBe(true);
+  });
+
+  it("rejects the wrong length", () => {
+    expect(isValidRandomizedGames([true, true])).toBe(false);
+    expect(isValidRandomizedGames([true, true, true, true])).toBe(false);
+  });
+
+  it("rejects non-boolean entries", () => {
+    expect(isValidRandomizedGames([true, "yes", true])).toBe(false);
+    expect(isValidRandomizedGames([1, 0, 1])).toBe(false);
+  });
+
+  it("rejects non-arrays", () => {
+    expect(isValidRandomizedGames({})).toBe(false);
+    expect(isValidRandomizedGames(null)).toBe(false);
   });
 });

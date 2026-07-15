@@ -81,6 +81,34 @@ describe("RoomDO /ws", () => {
     ws.close();
   });
 
+  it("defaults randomizedGames to [true, true, true] in the init message when never set", async () => {
+    const stub = getStub("test-room-ws-rg-default");
+    await initRoom(stub, "checksSeen");
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await nextMessage(ws);
+    expect(initMsg.randomizedGames).toEqual([true, true, true]);
+    ws.close();
+  });
+
+  it("includes randomizedGames reported by an earlier /sync call in the init message", async () => {
+    const stub = getStub("test-room-ws-rg");
+    await initRoom(stub, "checksSeen+shared");
+    await stub.fetch("https://do/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ checksSeen: new Array(96).fill(0), items: new Array(96).fill(0), epoch: 0, randomizedGames: [true, false, true] }),
+    });
+
+    const res = await stub.fetch("https://do/ws", { headers: { Upgrade: "websocket" } });
+    const ws = res.webSocket;
+    ws.accept();
+    const initMsg = await nextMessage(ws);
+    expect(initMsg.randomizedGames).toEqual([true, false, true]);
+    ws.close();
+  });
+
   it("broadcasts new events to connected sockets", async () => {
     const stub = getStub("test-room-ws-3");
     await initRoom(stub, "checksSeen+shared");

@@ -14,11 +14,11 @@ async function initRoom(stub, mode) {
   });
 }
 
-function sync(stub, checksSeen, epoch, shareFlags, items = new Array(96).fill(0)) {
+function sync(stub, checksSeen, epoch, shareFlags, items = new Array(96).fill(0), randomizedGames = undefined) {
   return stub.fetch("https://do/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checksSeen, epoch, shareFlags, items }),
+    body: JSON.stringify({ checksSeen, epoch, shareFlags, items, randomizedGames }),
   });
 }
 
@@ -126,6 +126,51 @@ describe("RoomDO /sync", () => {
     await initRoom(stub, "checksSeen");
     const res = await sync(stub, new Array(96).fill(0), 0, { notARealFlag: true });
     expect(res.status).toBe(400);
+  });
+
+  it("defaults to [true, true, true] for randomizedGames when no client has ever sent one", async () => {
+    const stub = getStub("test-room-sync-rg-1");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0);
+    expect((await res.json()).randomizedGames).toEqual([true, true, true]);
+  });
+
+  it("stores and echoes back a client-provided randomizedGames array", async () => {
+    const stub = getStub("test-room-sync-rg-2");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), [true, false, true]);
+    expect((await res.json()).randomizedGames).toEqual([true, false, true]);
+  });
+
+  it("keeps the last-known randomizedGames for a client that omits it", async () => {
+    const stub = getStub("test-room-sync-rg-3");
+    await initRoom(stub, "checksSeen");
+    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), [true, false, true]);
+    const res = await sync(stub, new Array(96).fill(0), 0); // no randomizedGames this time
+    expect((await res.json()).randomizedGames).toEqual([true, false, true]);
+  });
+
+  it("rejects an invalid randomizedGames array", async () => {
+    const stub = getStub("test-room-sync-rg-4");
+    await initRoom(stub, "checksSeen");
+    const res = await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), [true, "nope", true]);
+    expect(res.status).toBe(400);
+  });
+
+  it("resets randomizedGames back to [true, true, true] on admin/reset", async () => {
+    const stub = getStub("test-room-sync-rg-5");
+    await initRoom(stub, "checksSeen");
+    await sync(stub, new Array(96).fill(0), 0, undefined, new Array(96).fill(0), [true, false, true]);
+    const before = await (await sync(stub, new Array(96).fill(0), 0)).json();
+    expect(before.randomizedGames).toEqual([true, false, true]);
+
+    await stub.fetch("https://do/admin/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminSecret: "test-secret" }),
+    });
+    const after = await (await sync(stub, new Array(96).fill(0), 1)).json();
+    expect(after.randomizedGames).toEqual([true, true, true]);
   });
 
   it("defaults to an empty mergedItems array before any shared item is picked up", async () => {

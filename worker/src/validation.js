@@ -114,3 +114,14 @@ export function isValidShareFlags(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   return Object.keys(value).every((key) => SHARE_FLAG_KEYS.includes(key) && typeof value[key] === "boolean");
 }
+
+// Optional field on the /sync body -- which of the 3 titles this seed
+// actually randomizes (read from ROM by lua/share_info.lua's
+// readRandomizedGames, static for the whole session), used by the
+// team-progress tracker to hide a title's panel entirely when it isn't
+// part of the seed. Older Lua clients that predate this field simply omit
+// it, so `undefined` is valid too -- same pattern as isValidShareFlags.
+export function isValidRandomizedGames(value) {
+  if (value === undefined) return true;
+  return Array.isArray(value) && value.length === 3 && value.every((v) => typeof v === "boolean");
+}
