@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>RMR Sync — Relay</title>
+<!-- Same pixel font the reference tracker (ref/RMR_progress_tracker_displayer)
+     uses for its numeric overlays. External CDN, not self-hosted -- see
+     docs/superpowers/specs/2026-07-14-tracker-visual-redesign-design.md for
+     why every other asset here is local; this is a deliberate, temporary
+     exception pending a self-hosted replacement. .hud-number's font-family
+     falls back to a local monospace stack if this fails to load. -->
+<link href="https://font.emtech.cc/css/MuzaiPixel?weight=400&words=0123456789%2F" rel="stylesheet">
 <style>
   :root {
     --bg: #14141a;
@@ -35,7 +42,7 @@
   .gauge-cell img { width: 100%; height: 100%; object-fit: contain; display: block; image-rendering: pixelated; }
   .hud-number {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-family: "Courier New", ui-monospace, monospace; font-weight: 700; font-size: 0.8em; color: #000;
+    font-family: "MuzaiPixel", "Courier New", ui-monospace, monospace; font-weight: 700; font-size: 0.8em; color: #000;
     text-shadow:
       2px 0 0 #fff, 1.76px 0.96px 0 #fff, 1.08px 1.68px 0 #fff,
       0.14px 1.99px 0 #fff, -0.83px 1.82px 0 #fff, -1.6px 1.2px 0 #fff,
