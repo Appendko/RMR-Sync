@@ -53,6 +53,8 @@ let teamChecks = [];
 let mergedItems = new Array(96).fill(0);
 let totalDeaths = 0;
 let totalIfgUses = 0;
+let shareFlags = {};
+let randomizedGames = [true, true, true];
 
 function toProgressWebSocketUrl(workerUrl, room) {
   const httpUrl = new URL(`/room/${encodeURIComponent(room)}/ws`, workerUrl);
@@ -140,6 +142,7 @@ function renderProgressGrid() {
 
   for (const title of [1, 2, 3]) {
     const layout = TEAM_PROGRESS_LAYOUT[title];
+    if (randomizedGames[title - 1] === false) continue;
     const section = document.createElement("div");
     section.className = "title-panel";
 
@@ -226,6 +229,8 @@ function applyProgressState(msg) {
   if (msg.mergedItems !== undefined) mergedItems = msg.mergedItems;
   if (msg.totalDeaths !== undefined) totalDeaths = msg.totalDeaths;
   if (msg.totalIfgUses !== undefined) totalIfgUses = msg.totalIfgUses;
+  if (msg.shareFlags !== undefined) shareFlags = msg.shareFlags;
+  if (msg.randomizedGames !== undefined) randomizedGames = msg.randomizedGames;
   renderProgressGrid();
 }
 
