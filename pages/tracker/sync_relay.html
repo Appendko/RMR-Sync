@@ -67,6 +67,10 @@
 
   #connectionPanel.collapsed { display: none; }
 
+  .mode-tabs { display: flex; gap: 0.5em; margin-bottom: 0.75em; }
+  .mode-tab { background: none; border: 1px solid var(--text-dim); color: var(--text-dim); border-radius: 4px; padding: 0.4em 0.9em; cursor: pointer; font-size: 0.95em; }
+  .mode-tab.active { border-color: var(--text); color: var(--text); background: var(--panel-bg); }
+
   .armor-overlay { position: relative; padding: 6%; aspect-ratio: 1; }
   .armor-overlay img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
   .armor-part { opacity: 0; transition: opacity 0.4s ease; }
@@ -74,38 +78,44 @@
 </style>
 </head>
 <body>
-<h1>RMR Sync — Relay</h1>
-
 <div class="corner-controls" id="cornerControls">
   <span class="status-dot" id="statusDot"></span>
   <button id="reopenPanelBtn" title="Show connection settings">⚙</button>
 </div>
 
 <div id="connectionPanel">
+  <h1>RMR Sync — Relay</h1>
   <p>
-    Keep this tab open while you play. It reads your game's local sync files
-    and relays them to the Cloudflare backend — no other setup needed beyond
-    picking the folder that contains <code>boot.lua</code> once.
-    Requires Chrome, Edge, or another Chromium-based browser.
+    Keep this tab open while you play. Requires Chrome, Edge, or another
+    Chromium-based browser. Pick your game folder below for full relay
+    functionality, or use manual input to just watch the team's progress
+    without connecting a folder.
   </p>
 
   <div class="panel-toggle-row">
     <button id="hidePanelBtn">Hide setup</button>
   </div>
 
-  <h2>Team progress</h2>
-  <p>
-    Enter a Worker URL and room key to see the team's progress below — this
-    works even without connecting a game folder. If you connect a folder
-    below, these fill in automatically from your own game's settings.
-  </p>
-  <label>Worker URL<br><input type="text" id="progressWorkerUrl" style="width:100%" autocomplete="off" /></label><br><br>
-  <label>Room key<br><input type="text" id="progressRoomKey" style="width:100%" autocomplete="off" /></label>
-
   <h2>Game connection</h2>
-  <button id="pickBtn">Choose game folder</button>
-  <button id="reconnectBtn" style="display:none">Reconnect folder</button>
-  <div id="status">Not connected.</div>
+  <div class="mode-tabs">
+    <button id="modeFolderBtn" class="mode-tab active">Game folder</button>
+    <button id="modeManualBtn" class="mode-tab">Manual input</button>
+  </div>
+
+  <div id="folderModePanel">
+    <button id="pickBtn">Choose game folder</button>
+    <button id="reconnectBtn" style="display:none">Reconnect folder</button>
+    <div id="status">Not connected.</div>
+  </div>
+
+  <div id="manualModePanel" style="display:none">
+    <p>
+      Enter a Worker URL and room key to see the team's progress — this
+      works even without connecting a game folder.
+    </p>
+    <label>Worker URL<br><input type="text" id="progressWorkerUrl" style="width:100%" autocomplete="off" /></label><br><br>
+    <label>Room key<br><input type="text" id="progressRoomKey" style="width:100%" autocomplete="off" /></label>
+  </div>
 </div>
 
 <div id="progressPanel"></div>

@@ -520,6 +520,20 @@ document.getElementById("reopenPanelBtn").addEventListener("click", () => setPan
 restorePanelCollapsed();
 updateStatusDot();
 
+// Purely a view toggle -- switching modes never disconnects or resets
+// anything already running (folder polling, the progress WebSocket); it
+// just changes which panel is visible, so switching back and forth is safe.
+function setConnectionMode(mode) {
+  const isFolder = mode === "folder";
+  document.getElementById("folderModePanel").style.display = isFolder ? "" : "none";
+  document.getElementById("manualModePanel").style.display = isFolder ? "none" : "";
+  document.getElementById("modeFolderBtn").classList.toggle("active", isFolder);
+  document.getElementById("modeManualBtn").classList.toggle("active", !isFolder);
+}
+
+document.getElementById("modeFolderBtn").addEventListener("click", () => setConnectionMode("folder"));
+document.getElementById("modeManualBtn").addEventListener("click", () => setConnectionMode("manual"));
+
 (async () => {
   const restored = await restoreFolder();
   if (restored === "needs-permission") {
