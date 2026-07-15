@@ -96,3 +96,33 @@ anything's been saved) or for sharing a ready-to-use link:
 See `worker/README.md`. No changes to any other file are needed — just
 point `worker_url` (in `share_config.txt` and the admin page) at your own
 deployed Worker.
+
+## Credits
+
+This mod is built on top of, and takes design inspiration from, other
+people's work:
+
+- **[Route MatriX Randomizer](https://borokobo.web.fc2.com/index.html)**
+  (Rockman/Mega Man X1–X3 combined randomizer) — by Neoぼろくず工房
+  (Puresabe). RMR Sync is a companion mod for this randomizer; without it,
+  none of this exists. See also the
+  [seed option generator](https://borokobo.web.fc2.com/misc/rmr_option.html).
+  Not hosted on GitHub.
+- **[rockman-x-route-matrix-randomizer-progress-displayer](https://github.com/fsworld009/rockman-x-route-matrix-randomizer-progress-displayer)**
+  (fsworld009, forked from
+  [f6bfb5](https://github.com/f6bfb5/rockman-x-route-matrix-randomizer-progress-displayer))
+  — a SolidJS-based progress tracker/OBS overlay. `pages/tracker/sync_relay.html`'s
+  team-progress grid (dark theme, CSS-grid icon layout, the composite
+  armor-overlay technique, gauge-cell counters) was redesigned by directly
+  studying this project's own source.
+- **[Route-MatriX-Randomizer_progress_tracker_js](https://github.com/fsworld009/Route-MatriX-Randomizer_progress_tracker_js)**
+  (fsworld009) — `pages/tracker/check_id_map.js`'s id table was originally
+  ported from this project's own data, and `lua/share_info.lua` reuses its
+  RAM addresses for IFG-use and per-title death counters verbatim.
+- **[DSEG](https://github.com/keshikan/DSEG)** (keshikan) — the
+  seven-segment "digital display" font used for the team-progress grid's
+  gauge numbers, self-hosted under `pages/tracker/assets/fonts/` (SIL Open
+  Font License 1.1, included alongside the font file).
+
+Sprite/icon assets under `pages/tracker/assets/` are sourced from the
+trackers above where noted in nearby code comments.
