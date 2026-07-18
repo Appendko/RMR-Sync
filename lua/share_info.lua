@@ -299,6 +299,7 @@ local outstandingSeq = nil
 local pendingEvents = {}
 local shareMode = nil
 local previousItems = nil
+local previousChecksSeen = nil
 local previousChecks = nil
 local previousProgressFrame = nil
 local previousGameClear = nil
@@ -358,14 +359,28 @@ local function issueRequest()
     seq = seq + 1
     outstandingSeq = seq
     -- While WRAM is still settling after a title switch (see
-    -- checkForRomReload), substitute the last known-good items snapshot
-    -- instead of a live read -- addrItems briefly reads back console-reset
-    -- garbage right after a reload, and sending that would permanently
-    -- pollute the room's merged pool. Nothing else here is affected by
-    -- that (checksSeen/events/deltas use different WRAM entirely, and
-    -- events never touch mergedItems server-side anyway), so this request
-    -- still fires immediately and normally either way -- only the items
-    -- value gets swapped, not the request itself.
+    -- checkForRomReload), substitute the last known-good items/checksSeen
+    -- snapshots instead of a live read. Both addrItems and addrChecksSeen
+    -- briefly read back a not-yet-corrected value right after a reload,
+    -- and both merge server-side with a straight OR (never clears a bit),
+    -- so sending either live during settling would permanently pollute
+    -- the room. previousItems/previousChecksSeen hold whatever was last
+    -- confirmed true before the reload (checkForNewItems doesn't run
+    -- during settling, so previousItems can't have been overwritten by a
+    -- garbage read either; previousChecksSeen is only ever updated here,
+    -- below, when not settling). Events/deltas aren't affected by any of
+    -- this (different WRAM, and events never touch mergedItems/checksSeen
+    -- server-side anyway), so this request still fires immediately and
+    -- normally either way -- only these two values get swapped, not the
+    -- request itself.
+    local checksSeenNow = readChecksSeen()
+    local checksSeenToSend
+    if wramSettling then
+        checksSeenToSend = previousChecksSeen or checksSeenNow
+    else
+        previousChecksSeen = checksSeenNow
+        checksSeenToSend = checksSeenNow
+    end
     local itemsToSend = (wramSettling and previousItems) or readItems()
     Relay.writeOutbox({
         session = session,
@@ -373,7 +388,7 @@ local function issueRequest()
         workerUrl = cfg.worker_url,
         roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
-        sync = { checksSeen = readChecksSeen(), items = itemsToSend, epoch = knownEpoch, shareFlags = shareFlags, randomizedGames = randomizedGames },
+        sync = { checksSeen = checksSeenToSend, items = itemsToSend, epoch = knownEpoch, shareFlags = shareFlags, randomizedGames = randomizedGames },
         events = pendingEvents,
     }, gameDir)
 end
@@ -570,25 +585,34 @@ end
 -- Detects a ROM reload (a title switch, or the initial boot) via
 -- ew.framecount() going backwards -- BizHawk resets it to 0 on every
 -- client.openrom() -- and holds a "settling" state for a fixed cooldown
--- window afterward. Returns true while addrItems specifically should NOT
--- be trusted -- see the two call sites (checkForNewItems/
--- checkForVavaStageKeyOwned gated in the main loop, issueRequest's items
--- substitution) for what that actually blocks. Nothing else (checks,
--- game-clear, IFG, deaths, checksSeen, events, the heartbeat itself) reads
--- addrItems or is gated by this at all.
+-- window afterward. Returns true while WRAM-derived state generally
+-- shouldn't be trusted: every one of checkForNewItems/Checks/GameClear/
+-- Ifg/Deaths/VavaStageKeyOwned gets skipped entirely in the main loop
+-- while this is true (see its call site), and issueRequest() substitutes
+-- frozen items/checksSeen snapshots for the two fields that merge
+-- server-side via an unclearable OR. The heartbeat itself still fires on
+-- schedule -- only those specific values are swapped, not the request.
 --
 -- A fixed cooldown, not "wait until readItems() stops changing": real
 -- gameplay picking up items changes readItems() too, indistinguishably
 -- from mid-settling flux from this function's point of view. An
--- earlier until-stable exit condition got stuck permanently true (back
--- when this also gated every other report and the heartbeat) the moment
--- a player kept playing through the settling window instead of pausing --
--- live-observed 2026-07-18. cSettlingCooldownFrames is set well above the
--- largest settling duration observed in that same investigation (~2847
--- frames, one title pairing was consistently slower than the rest) so it
--- can never clear while WRAM is still correcting itself, while still
--- guaranteeing it clears on a bounded timer no matter how the player
--- behaves.
+-- until-stable exit condition got stuck permanently true the moment a
+-- player kept playing through the settling window instead of pausing --
+-- live-observed 2026-07-18. A later attempt to narrow the gate to only
+-- items/Vava-key (letting checks/game-clear/IFG/deaths run unconditionally)
+-- turned out to have the same flaw one level down: those functions update
+-- their own "previous" baseline every call regardless of whether they
+-- report, so letting them run during settling let a transient dip get
+-- adopted as the new baseline, then the correction back up read as a
+-- second, duplicate delta -- also live-observed, the next day. Skipping
+-- the whole call is what actually avoids both failure modes: nothing
+-- advances a baseline off an untrustworthy read, so nothing is lost
+-- (the first post-settling call reports the full accumulated delta) and
+-- nothing duplicates. cSettlingCooldownFrames is set well above the
+-- largest settling duration observed (~2847 frames, one title pairing was
+-- consistently slower than the rest) so it can never clear while WRAM is
+-- still correcting itself, while still guaranteeing it clears on a
+-- bounded timer no matter how the player behaves.
 local function checkForRomReload()
     local frameNow = ew.framecount()
     if previousFrameCount and frameNow < previousFrameCount then
@@ -616,20 +640,29 @@ while true do
         itemCheckFrames = cItemCheckFrames
         tryConsumeInbox()
         local settling = checkForRomReload()
-        -- Only these two touch addrItems (directly, or via the diffing
-        -- baseline it feeds) -- gated during settling so a mid-transition
-        -- garbage read is never mistaken for a huge pickup burst or a
-        -- premature Vava-key check grant. Everything else below reads
-        -- unrelated WRAM and isn't affected, so it keeps reporting and
-        -- syncing immediately, with no settling-related delay at all.
+        -- All six skipped entirely (not just their reporting step) while
+        -- settling: every one of them diffs a "previous" baseline against
+        -- a fresh WRAM/sessionSave read, and boot.lua's own post-reload
+        -- correction (OR-merge for items/checks/checksSeen, "keep the
+        -- higher value" for titleValue/IFG/deaths) briefly reads back a
+        -- not-yet-corrected value either way. Calling a function but
+        -- suppressing only its report still lets it advance its baseline
+        -- off that bad intermediate read, which is exactly what caused
+        -- duplicate death/IFG reports the first time this was tried
+        -- (2026-07-19): a transient dip got adopted as the new baseline,
+        -- then the correction back up looked like a second, fake delta.
+        -- Skipping the whole call instead leaves each baseline frozen at
+        -- its last-confirmed-true value throughout settling, so the
+        -- first post-settling call reports the real, total delta exactly
+        -- once -- deferred, never duplicated, never silently dropped.
         if not settling then
             checkForNewItems()
+            checkForNewChecks()
+            checkForNewGameClear()
+            checkForNewIfg()
+            checkForNewDeaths()
             checkForVavaStageKeyOwned()
         end
-        checkForNewChecks()
-        checkForNewGameClear()
-        checkForNewIfg()
-        checkForNewDeaths()
         if outstandingSeq ~= nil then
             staleCycles = staleCycles + 1
             if staleCycles >= cStaleThreshold then
@@ -642,9 +675,11 @@ while true do
     if waitFrames <= 0 then
         waitFrames = cWaitFrames
         -- Not gated on wramSettling -- issueRequest() itself already
-        -- substitutes a safe items value while settling, so the heartbeat
-        -- firing on schedule regardless keeps checksSeen/events/deltas
-        -- flowing with no settling-related delay.
+        -- substitutes safe items/checksSeen values while settling, so the
+        -- heartbeat firing on schedule regardless keeps events/deltas
+        -- flowing with no settling-related delay (there's nothing new to
+        -- report from the gated functions above during that window
+        -- anyway, since they didn't run).
         if outstandingSeq == nil then
             issueRequest()
         end
