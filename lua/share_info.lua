@@ -65,6 +65,15 @@ local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
 -- other titles' death counts while inactive).
 local addrIFG = 0x7FFFAE
 local addrDeathByTitle = { 0x7E1F80, 0x7E1FB3, 0x7E1FB4 }
+-- ref/aaa/boot.lua's own "are we in a valid, properly-booted state, not
+-- mid-reset" check (its own main loop fatal-errors if this doesn't hold) --
+-- reused here as checkForRomReload's precise "WRAM is trustworthy again"
+-- signal. addrIInfo reads 0x784D once boot.lua's own post-reload
+-- initialization has completed; addrSInfo reads 0xFF while invalid/
+-- uninitialized. Confirmed live (2026-07-19) to flip back to valid on the
+-- exact same frame addrItems finishes correcting, every time observed.
+local addrIInfo = 0x7FFFE6
+local addrSInfo = 0x7FFFEC
 -- ref/RMR_progress_tracker_displayer_ver_js_20260126/progress_tracker_js/
 -- RMR_progress_tracker.lua's own address for the checks array, distinct
 -- from addrChecksSeen -- like addrChecksSeen, a shared, per-active-title RAM
@@ -95,15 +104,20 @@ local cInitBurstThreshold = 6 -- entering a title for the first time auto-initia
 -- A title switch (switchGame -> loadGame -> client.openrom) briefly exposes
 -- WRAM in a not-yet-settled state before boot.lua's own savestate.load/
 -- synchronize_or has corrected addrItems back to the true value -- confirmed
--- live (2026-07-18 investigation) to read as a large, real-looking but
--- bogus bit pattern, taking as long as ~2847 frames (~47s) to correct in
--- the slowest observed case. Sending that straight to /sync would
--- permanently OR-merge garbage into the room (merges never clear bits).
--- ew.framecount() resetting to a value lower than last seen is the
--- reliable signal a reload just happened; this is a fixed cooldown
--- (see checkForRomReload's own comment for why it's fixed rather than
--- until-stable), generous above that observed worst case.
-local cSettlingCooldownFrames = 3600 -- ~60s at 60fps
+-- live (2026-07-18/19 investigation) to read as a large, real-looking but
+-- bogus bit pattern. How long that takes varies a lot by title pairing --
+-- observed anywhere from ~600 to ~7684 frames (~10s to ~128s) -- which
+-- ruled out a fixed cooldown as the primary signal: 60s looked like a
+-- generous margin against an initial ~47s worst-case sample, then a later
+-- test found a pairing that took over twice that long. checkForRomReload
+-- now clears settling based on addrIInfo/addrSInfo actually reading back
+-- valid (see their own comment above) -- confirmed live to match
+-- addrItems' true settling frame exactly, every time observed, regardless
+-- of how long that took. This constant is now only a last-resort backstop
+-- in case that flag-based detection somehow never recovers; it should
+-- essentially never be the thing that actually fires, so it's set far
+-- above every duration seen so far rather than tightly tuned.
+local cSettlingFallbackFrames = 12000 -- ~200s at 60fps -- backstop only, not the primary signal
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -584,52 +598,63 @@ end
 
 -- Detects a ROM reload (a title switch, or the initial boot) via
 -- ew.framecount() going backwards -- BizHawk resets it to 0 on every
--- client.openrom() -- and holds a "settling" state for a fixed cooldown
--- window afterward. Returns true while WRAM-derived state generally
--- shouldn't be trusted: every one of checkForNewItems/Checks/GameClear/
--- Ifg/Deaths/VavaStageKeyOwned gets skipped entirely in the main loop
--- while this is true (see its call site), and issueRequest() substitutes
--- frozen items/checksSeen snapshots for the two fields that merge
--- server-side via an unclearable OR. The heartbeat itself still fires on
--- schedule -- only those specific values are swapped, not the request.
+-- client.openrom() -- and holds a "settling" state until WRAM is
+-- confirmed trustworthy again. Returns true while WRAM-derived state
+-- generally shouldn't be trusted: every one of checkForNewItems/Checks/
+-- GameClear/Ifg/Deaths/VavaStageKeyOwned gets skipped entirely in the
+-- main loop while this is true (see its call site), and issueRequest()
+-- substitutes frozen items/checksSeen snapshots for the two fields that
+-- merge server-side via an unclearable OR. The heartbeat itself still
+-- fires on schedule -- only those specific values are swapped, not the
+-- request.
 --
--- A fixed cooldown, not "wait until readItems() stops changing": real
+-- Cleared by addrIInfo/addrSInfo actually reading back valid (see their
+-- own comment above), not a fixed timer: how long a title switch takes to
+-- settle varies enormously by pairing -- live-observed (2026-07-19)
+-- anywhere from ~600 to ~7684 frames (~10s to ~128s) -- so any fixed
+-- cooldown is either unsafe (too short for a slow pairing) or needlessly
+-- slow (padded for a pairing that actually settled fast). addrIInfo/
+-- addrSInfo flipping back to valid matched addrItems' true settling frame
+-- exactly in every case observed, so it replaces guessing a margin
+-- entirely. cSettlingFallbackFrames only matters if that flag-based
+-- check somehow never recovers -- see its own comment for why it's set
+-- far above every observed duration rather than tuned tightly.
+--
+-- Not "wait until readItems() stops changing" (an earlier attempt): real
 -- gameplay picking up items changes readItems() too, indistinguishably
--- from mid-settling flux from this function's point of view. An
--- until-stable exit condition got stuck permanently true the moment a
--- player kept playing through the settling window instead of pausing --
--- live-observed 2026-07-18. A later attempt to narrow the gate to only
--- items/Vava-key (letting checks/game-clear/IFG/deaths run unconditionally)
--- turned out to have the same flaw one level down: those functions update
--- their own "previous" baseline every call regardless of whether they
--- report, so letting them run during settling let a transient dip get
--- adopted as the new baseline, then the correction back up read as a
--- second, duplicate delta -- also live-observed, the next day. Skipping
--- the whole call is what actually avoids both failure modes: nothing
--- advances a baseline off an untrustworthy read, so nothing is lost
--- (the first post-settling call reports the full accumulated delta) and
--- nothing duplicates. cSettlingCooldownFrames is set well above the
--- largest settling duration observed (~2847 frames, one title pairing was
--- consistently slower than the rest) so it can never clear while WRAM is
--- still correcting itself, while still guaranteeing it clears on a
--- bounded timer no matter how the player behaves.
+-- from mid-settling flux from this function's point of view -- that
+-- version got stuck permanently true the moment a player kept playing
+-- through the settling window instead of pausing. A later attempt to
+-- narrow the gate to only items/Vava-key (letting checks/game-clear/IFG/
+-- deaths run unconditionally) turned out to have the same flaw one level
+-- down: those functions update their own "previous" baseline every call
+-- regardless of whether they report, so letting them run during settling
+-- let a transient dip get adopted as the new baseline, then the
+-- correction back up read as a second, duplicate delta. Skipping the
+-- whole call is what actually avoids both failure modes: nothing advances
+-- a baseline off an untrustworthy read, so nothing is lost (the first
+-- post-settling call reports the full accumulated delta) and nothing
+-- duplicates.
 local function checkForRomReload()
     local frameNow = ew.framecount()
     if previousFrameCount and frameNow < previousFrameCount then
         wramSettling = true
-        settlingUntilFrame = frameNow + cSettlingCooldownFrames
+        settlingUntilFrame = frameNow + cSettlingFallbackFrames
         statusLine("title switch detected, waiting for WRAM to settle")
     end
     previousFrameCount = frameNow
 
-    if wramSettling and frameNow >= settlingUntilFrame then
-        wramSettling = false
-        -- Resync the diffing baseline to the now-trustworthy state, so
-        -- the transition itself (whatever it looked like mid-settling)
-        -- is never mistaken for a real pickup once normal diffing
-        -- resumes -- same reasoning as tryConsumeInbox's own resync.
-        previousItems = readItems()
-        statusLine("WRAM settled, resuming normal sync")
+    if wramSettling then
+        local bootStateValid = cpu2[addrIInfo] == 0x784D and cpu[addrSInfo] ~= 0xFF
+        if bootStateValid or frameNow >= settlingUntilFrame then
+            wramSettling = false
+            -- Resync the diffing baseline to the now-trustworthy state, so
+            -- the transition itself (whatever it looked like mid-settling)
+            -- is never mistaken for a real pickup once normal diffing
+            -- resumes -- same reasoning as tryConsumeInbox's own resync.
+            previousItems = readItems()
+            statusLine("WRAM settled, resuming normal sync")
+        end
     end
     return wramSettling
 end
