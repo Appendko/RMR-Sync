@@ -96,13 +96,14 @@ local cInitBurstThreshold = 6 -- entering a title for the first time auto-initia
 -- WRAM in a not-yet-settled state before boot.lua's own savestate.load/
 -- synchronize_or has corrected addrItems back to the true value -- confirmed
 -- live (2026-07-18 investigation) to read as a large, real-looking but
--- bogus bit pattern for up to several hundred frames after the reload.
--- Sending that straight to /sync would permanently OR-merge garbage into
--- the room (merges never clear bits). ew.framecount() resetting to a value
--- lower than last seen is the reliable signal a reload just happened; once
--- readItems() has read the same value for this many consecutive fast-poll
--- cycles in a row, WRAM is trusted again.
-local cSettlingStableCycles = 5
+-- bogus bit pattern, taking as long as ~2847 frames (~47s) to correct in
+-- the slowest observed case. Sending that straight to /sync would
+-- permanently OR-merge garbage into the room (merges never clear bits).
+-- ew.framecount() resetting to a value lower than last seen is the
+-- reliable signal a reload just happened; this is a fixed cooldown
+-- (see checkForRomReload's own comment for why it's fixed rather than
+-- until-stable), generous above that observed worst case.
+local cSettlingCooldownFrames = 3600 -- ~60s at 60fps
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -310,8 +311,7 @@ local staleCycles = 0
 local itemCheckFrames = 0
 local previousFrameCount = nil
 local wramSettling = false
-local settlingItemsBaseline = nil
-local settlingStableCycles = 0
+local settlingUntilFrame = nil
 
 -- Lua console only (not Text.out/on-screen) -- an on-screen overlay redrawn
 -- only once per poll cycle (every ~1.5s) reads as a flicker rather than a
@@ -557,46 +557,41 @@ local function checkForVavaStageKeyOwned()
     end
 end
 
-local function itemsEqual(a, b)
-    for i = 1, #a do
-        if a[i] ~= b[i] then return false end
-    end
-    return true
-end
-
 -- Detects a ROM reload (a title switch, or the initial boot) via
 -- ew.framecount() going backwards -- BizHawk resets it to 0 on every
--- client.openrom() -- and enters/maintains a "settling" state until
--- readItems() has reported the exact same value cSettlingStableCycles times
--- in a row. Returns true while WRAM should NOT be trusted for reporting or
--- sending to the server (see cSettlingStableCycles' comment for why).
+-- client.openrom() -- and holds a "settling" state for a fixed cooldown
+-- window afterward. Returns true while WRAM should NOT be trusted for
+-- reporting or sending to the server.
+--
+-- A fixed cooldown, not "wait until readItems() stops changing": real
+-- gameplay picking up items changes readItems() too, indistinguishably
+-- from mid-settling flux from this function's point of view. An
+-- until-stable exit condition got stuck permanently true (silently
+-- suppressing every check/game-clear/IFG/death report and the heartbeat
+-- sync) the moment a player kept playing through the settling window
+-- instead of pausing -- live-observed 2026-07-18. cSettlingCooldownFrames
+-- is set well above the largest settling duration observed in that same
+-- investigation (~2847 frames, one title pairing was consistently
+-- slower than the rest) so it can never fire while WRAM is still
+-- correcting itself, while still guaranteeing reporting resumes on a
+-- bounded timer no matter how the player behaves.
 local function checkForRomReload()
     local frameNow = ew.framecount()
     if previousFrameCount and frameNow < previousFrameCount then
         wramSettling = true
-        settlingItemsBaseline = nil
-        settlingStableCycles = 0
+        settlingUntilFrame = frameNow + cSettlingCooldownFrames
         statusLine("title switch detected, waiting for WRAM to settle")
     end
     previousFrameCount = frameNow
 
-    if wramSettling then
-        local itemsNow = readItems()
-        if settlingItemsBaseline and itemsEqual(settlingItemsBaseline, itemsNow) then
-            settlingStableCycles = settlingStableCycles + 1
-        else
-            settlingStableCycles = 0
-        end
-        settlingItemsBaseline = itemsNow
-        if settlingStableCycles >= cSettlingStableCycles then
-            wramSettling = false
-            -- Resync the diffing baseline to the now-trustworthy state, so
-            -- the transition itself (whatever it looked like mid-settling)
-            -- is never mistaken for a real pickup once normal diffing
-            -- resumes -- same reasoning as tryConsumeInbox's own resync.
-            previousItems = itemsNow
-            statusLine("WRAM settled, resuming normal sync")
-        end
+    if wramSettling and frameNow >= settlingUntilFrame then
+        wramSettling = false
+        -- Resync the diffing baseline to the now-trustworthy state, so
+        -- the transition itself (whatever it looked like mid-settling)
+        -- is never mistaken for a real pickup once normal diffing
+        -- resumes -- same reasoning as tryConsumeInbox's own resync.
+        previousItems = readItems()
+        statusLine("WRAM settled, resuming normal sync")
     end
     return wramSettling
 end
