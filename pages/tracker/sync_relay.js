@@ -414,6 +414,18 @@ async function tick() {
   if (typeof req.seq !== "number" || req.seq <= lastSeq) {
     return; // already handled, or malformed
   }
+  // Claim this seq synchronously, before any awaited fetch -- tick() runs on
+  // a 400ms setInterval regardless of whether the previous tick() finished,
+  // and a single /event POST round-trip slower than that is enough for the
+  // next tick to fire, re-read this same still-unconsumed outbox file, and
+  // (if lastSeq were only updated at the end) pass this exact guard a second
+  // time, posting every event in req.events a second time. deathDelta/
+  // ifgDelta are deliberately never deduped server-side (each real delta must
+  // show up), so a duplicate post here reads as a duplicate death/IFG report
+  // in the event feed -- live-observed 2026-07-19. Since nothing below this
+  // line awaits before the next await, no other tick() invocation can
+  // interleave between the check above and this assignment.
+  lastSeq = req.seq;
 
   const base = String(req.workerUrl || "").replace(/\/$/, "");
   const room = `${base}/room/${encodeURIComponent(req.roomKey)}`;
@@ -460,7 +472,6 @@ async function tick() {
   }
 
   await writeInbox(dirHandle, resp);
-  lastSeq = req.seq;
   log(`Connected. Last handled request: seq ${req.seq}${resp.error ? " (error: " + resp.error + ")" : ""}`);
 }
 

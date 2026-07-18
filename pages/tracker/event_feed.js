@@ -8,6 +8,7 @@ const MAX_LINES_STORAGE_KEY = "rmrSyncMaxLines";
 const SHOW_TEXT_STORAGE_KEY = "rmrSyncShowText";
 const SHOW_ITEMS_STORAGE_KEY = "rmrSyncShowItems";
 const SHOW_CHECKS_STORAGE_KEY = "rmrSyncShowChecks";
+const SHOW_SYSTEM_STORAGE_KEY = "rmrSyncShowSystem";
 const LANG_STORAGE_KEY = "rmrSyncLang";
 const SCALE_STORAGE_KEY = "rmrSyncScale";
 
@@ -122,6 +123,16 @@ function getShowChecksDefault() {
   return raw === "1" || raw === "true";
 }
 
+// Optional ?showSystem=0 query param (or settings-panel equivalent) to hide
+// the connect/disconnect status lines (appendStatusLine) from the log --
+// useful for an OBS overlay where a reconnect message mid-stream is just
+// noise. Same default-true convention as showItems/showChecks.
+function getShowSystemDefault() {
+  const raw = resolveStoredOrQuery(SHOW_SYSTEM_STORAGE_KEY, "showSystem");
+  if (raw === null) return true;
+  return raw === "1" || raw === "true";
+}
+
 // Best-effort mapping from the browser's language preference to one of our
 // supported item-name languages. Only maps to zh-TW for Traditional-Chinese-
 // flavored tags (zh-TW/zh-Hant/zh-HK/zh-MO) -- plain "zh" or "zh-CN" is
@@ -172,6 +183,7 @@ function setupSettingsPanel() {
   const showTextInput = document.getElementById("settingsShowText");
   const showItemsInput = document.getElementById("settingsShowItems");
   const showChecksInput = document.getElementById("settingsShowChecks");
+  const showSystemInput = document.getElementById("settingsShowSystem");
   const langInput = document.getElementById("settingsLang");
   const scaleInput = document.getElementById("settingsScale");
   const applyButton = document.getElementById("settingsApply");
@@ -183,6 +195,7 @@ function setupSettingsPanel() {
   showTextInput.checked = storedShowText === "1" || storedShowText === "true";
   showItemsInput.checked = getShowItemsDefault();
   showChecksInput.checked = getShowChecksDefault();
+  showSystemInput.checked = getShowSystemDefault();
   // Prefill with the fully-resolved language (falling through to auto-detect)
   // rather than only the raw stored/query value, so the dropdown always shows
   // what's actually in effect right now, not blank when nothing's been chosen yet.
@@ -205,6 +218,7 @@ function setupSettingsPanel() {
     setStored(SHOW_TEXT_STORAGE_KEY, showTextInput.checked ? "1" : "0");
     setStored(SHOW_ITEMS_STORAGE_KEY, showItemsInput.checked ? "1" : "0");
     setStored(SHOW_CHECKS_STORAGE_KEY, showChecksInput.checked ? "1" : "0");
+    setStored(SHOW_SYSTEM_STORAGE_KEY, showSystemInput.checked ? "1" : "0");
     setStored(LANG_STORAGE_KEY, langInput.value);
     setStored(SCALE_STORAGE_KEY, scaleInput.value.trim());
     window.location.reload();
@@ -348,6 +362,7 @@ function main() {
   const showText = getShowTextDefault();
   const showItems = getShowItemsDefault();
   const showChecks = getShowChecksDefault();
+  const showSystem = getShowSystemDefault();
   const lang = resolveLanguage();
   const maxLines = getMaxLines();
   let allEvents = [];
@@ -375,6 +390,9 @@ function main() {
   }
 
   function appendStatusLine(text) {
+    if (!showSystem) {
+      return;
+    }
     const el = document.createElement("div");
     el.className = "entry status-line";
     el.textContent = text;
