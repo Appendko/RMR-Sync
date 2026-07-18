@@ -92,6 +92,17 @@ local cItemCheckFrames = 12 -- ~0.2s at 60fps: cheap RAM-only check for newly-ac
 local cWaitFrames = 600 -- ~10s at 60fps: idle-only heartbeat (pulls others' checksSeen updates when nothing local has triggered a request) -- deliberately slow to reduce Worker/Durable-Object request volume for a real multi-player session; checksSeen sync has no real latency requirement
 local cStaleThreshold = 20 -- ~20 fast-cycles * ~0.2s = ~4s of genuine unresponsiveness before warning, matching the original user-facing timing despite ack-checking now running on the fast timer instead of the (now much slower) idle heartbeat
 local cInitBurstThreshold = 6 -- entering a title for the first time auto-initializes several item bits at once (observed ~8); a batch this size or larger is treated as initialization noise, not a real pickup, and isn't reported to the event feed
+-- A title switch (switchGame -> loadGame -> client.openrom) briefly exposes
+-- WRAM in a not-yet-settled state before boot.lua's own savestate.load/
+-- synchronize_or has corrected addrItems back to the true value -- confirmed
+-- live (2026-07-18 investigation) to read as a large, real-looking but
+-- bogus bit pattern for up to several hundred frames after the reload.
+-- Sending that straight to /sync would permanently OR-merge garbage into
+-- the room (merges never clear bits). ew.framecount() resetting to a value
+-- lower than last seen is the reliable signal a reload just happened; once
+-- readItems() has read the same value for this many consecutive fast-poll
+-- cycles in a row, WRAM is trusted again.
+local cSettlingStableCycles = 5
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -297,6 +308,10 @@ local knownEpoch = 0
 local waitFrames = 0
 local staleCycles = 0
 local itemCheckFrames = 0
+local previousFrameCount = nil
+local wramSettling = false
+local settlingItemsBaseline = nil
+local settlingStableCycles = 0
 
 -- Lua console only (not Text.out/on-screen) -- an on-screen overlay redrawn
 -- only once per poll cycle (every ~1.5s) reads as a flicker rather than a
@@ -542,17 +557,64 @@ local function checkForVavaStageKeyOwned()
     end
 end
 
+local function itemsEqual(a, b)
+    for i = 1, #a do
+        if a[i] ~= b[i] then return false end
+    end
+    return true
+end
+
+-- Detects a ROM reload (a title switch, or the initial boot) via
+-- ew.framecount() going backwards -- BizHawk resets it to 0 on every
+-- client.openrom() -- and enters/maintains a "settling" state until
+-- readItems() has reported the exact same value cSettlingStableCycles times
+-- in a row. Returns true while WRAM should NOT be trusted for reporting or
+-- sending to the server (see cSettlingStableCycles' comment for why).
+local function checkForRomReload()
+    local frameNow = ew.framecount()
+    if previousFrameCount and frameNow < previousFrameCount then
+        wramSettling = true
+        settlingItemsBaseline = nil
+        settlingStableCycles = 0
+        statusLine("title switch detected, waiting for WRAM to settle")
+    end
+    previousFrameCount = frameNow
+
+    if wramSettling then
+        local itemsNow = readItems()
+        if settlingItemsBaseline and itemsEqual(settlingItemsBaseline, itemsNow) then
+            settlingStableCycles = settlingStableCycles + 1
+        else
+            settlingStableCycles = 0
+        end
+        settlingItemsBaseline = itemsNow
+        if settlingStableCycles >= cSettlingStableCycles then
+            wramSettling = false
+            -- Resync the diffing baseline to the now-trustworthy state, so
+            -- the transition itself (whatever it looked like mid-settling)
+            -- is never mistaken for a real pickup once normal diffing
+            -- resumes -- same reasoning as tryConsumeInbox's own resync.
+            previousItems = itemsNow
+            statusLine("WRAM settled, resuming normal sync")
+        end
+    end
+    return wramSettling
+end
+
 while true do
     itemCheckFrames = itemCheckFrames - 1
     if itemCheckFrames <= 0 then
         itemCheckFrames = cItemCheckFrames
         tryConsumeInbox()
-        checkForNewItems()
-        checkForNewChecks()
-        checkForNewGameClear()
-        checkForNewIfg()
-        checkForNewDeaths()
-        checkForVavaStageKeyOwned()
+        local settling = checkForRomReload()
+        if not settling then
+            checkForNewItems()
+            checkForNewChecks()
+            checkForNewGameClear()
+            checkForNewIfg()
+            checkForNewDeaths()
+            checkForVavaStageKeyOwned()
+        end
         if outstandingSeq ~= nil then
             staleCycles = staleCycles + 1
             if staleCycles >= cStaleThreshold then
@@ -564,7 +626,12 @@ while true do
     waitFrames = waitFrames - 1
     if waitFrames <= 0 then
         waitFrames = cWaitFrames
-        if outstandingSeq == nil then
+        -- Also gated on wramSettling: readItems() feeds every issueRequest()
+        -- call unconditionally (see the outbox's sync.items field), so the
+        -- idle heartbeat must not fire mid-settling either -- it would send
+        -- the same untrustworthy snapshot the fast-poll gate above is
+        -- protecting against, just on its own slower timer.
+        if outstandingSeq == nil and not wramSettling then
             issueRequest()
         end
     end
