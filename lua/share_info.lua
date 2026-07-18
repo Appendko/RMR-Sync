@@ -95,15 +95,30 @@ local cInitBurstThreshold = 6 -- entering a title for the first time auto-initia
 -- A title switch (switchGame -> loadGame -> client.openrom) briefly exposes
 -- WRAM in a not-yet-settled state before boot.lua's own savestate.load/
 -- synchronize_or has corrected addrItems back to the true value -- confirmed
--- live (2026-07-18 investigation) to read as a large, real-looking but
--- bogus bit pattern, taking as long as ~2847 frames (~47s) to correct in
--- the slowest observed case. Sending that straight to /sync would
--- permanently OR-merge garbage into the room (merges never clear bits).
--- ew.framecount() resetting to a value lower than last seen is the
--- reliable signal a reload just happened; this is a fixed cooldown
--- (see checkForRomReload's own comment for why it's fixed rather than
--- until-stable), generous above that observed worst case.
-local cSettlingCooldownFrames = 3600 -- ~60s at 60fps
+-- live (2026-07-18/19 investigation) to read as a large, real-looking but
+-- bogus bit pattern. ew.framecount() resetting to a value lower than last
+-- seen is the reliable signal a reload just happened; this is a fixed
+-- cooldown (see checkForRomReload's own comment for why it's fixed rather
+-- than until-stable).
+--
+-- Not as fixed as it looks, though: checkForRomReload re-triggers (pushing
+-- the deadline forward again) on EVERY detected reset, not just the
+-- first -- so a single logical "title switch" that actually involves
+-- several internal ROM reloads a few hundred frames apart (confirmed to
+-- happen -- some transitions took over 7000 frames to finish settling
+-- even with this set far lower) keeps re-extending itself for as long as
+-- resets keep occurring, clearing only once they stop for a full
+-- cSettlingCooldownFrames stretch. statusLine's own dedup (same text
+-- doesn't reprint) hides the repeated re-triggers from the console, which
+-- is why this looked like a hard timeout before it was actually tested
+-- down at this value. That self-extension is what makes a short value
+-- here plausible instead of reckless: multi-step transitions cover
+-- themselves regardless of this constant. The residual risk is a
+-- genuinely single-step transition slower than this that never
+-- re-triggers -- the first (2026-07-18) test batch saw single-step
+-- transitions up to ~710 frames, just over this value; watch for the
+-- dense-mergedItems symptom returning if that turns out to matter live.
+local cSettlingCooldownFrames = 600 -- ~10s at 60fps
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
@@ -608,11 +623,14 @@ end
 -- the whole call is what actually avoids both failure modes: nothing
 -- advances a baseline off an untrustworthy read, so nothing is lost
 -- (the first post-settling call reports the full accumulated delta) and
--- nothing duplicates. cSettlingCooldownFrames is set well above the
--- largest settling duration observed (~2847 frames, one title pairing was
--- consistently slower than the rest) so it can never clear while WRAM is
--- still correcting itself, while still guaranteeing it clears on a
--- bounded timer no matter how the player behaves.
+-- nothing duplicates. cSettlingCooldownFrames itself can be set fairly
+-- short (see its own comment) because this function re-triggers on every
+-- detected reset, not just the first -- a slow, multi-step transition
+-- naturally keeps re-extending its own deadline for as long as internal
+-- resets keep happening, clearing only once they stop for a full
+-- cSettlingCooldownFrames stretch, regardless of how short that constant
+-- is. It still guarantees clearing on a bounded timer no matter how the
+-- player behaves (the original problem this exists to solve).
 local function checkForRomReload()
     local frameNow = ew.framecount()
     if previousFrameCount and frameNow < previousFrameCount then
