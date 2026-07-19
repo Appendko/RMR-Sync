@@ -5,7 +5,17 @@ import { shareCategoryForId } from "./shareCategories.js";
 const CHECKS_SEEN_LENGTH = 96;
 const ITEMS_LENGTH = 96;
 const MAX_EVENTS = 200;
-const EXPIRY_MS = 24 * 60 * 60 * 1000;
+// Room auto-expiry: wipes storage after this long with no sync/event
+// activity (see scheduleExpiry/alarm below). Lowered from 24h to 8h
+// (2026-07-20) -- a solo playthrough of this randomizer finishes in ~3h
+// (up to ~5h for a hard seed), so 8h of total inactivity is already a
+// generous margin past a real session ending, not a risk of wiping a
+// still-in-progress room. Reconnecting with the same room key after
+// expiry just creates a fresh empty room under that key (see
+// handleInit) -- not an error state. Shortening this also bounds how
+// long a forgotten/stale test room can keep costing Durable Objects
+// "duration" (GB-seconds) after its last real use.
+const EXPIRY_MS = 8 * 60 * 60 * 1000;
 const DUPLICATE_EVENT_WINDOW_MS = 15000;
 
 function jsonResponse(data, status = 200) {
