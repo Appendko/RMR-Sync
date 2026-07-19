@@ -212,7 +212,7 @@ function renderProgressGrid() {
     }
     section.appendChild(gaugeRow);
 
-    if (layout.zeroIds || layout.rideArmorIds || layout.subbossCheckIds) {
+    if (layout.zeroIds || layout.rideArmorIds || layout.subbossItemIds) {
       const extraRow = document.createElement("div");
       extraRow.className = "icon-grid";
       for (const itemId of layout.zeroIds || []) {
@@ -223,9 +223,9 @@ function renderProgressGrid() {
         const info = getIconInfoForId(itemId);
         extraRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
       }
-      for (const checkId of layout.subbossCheckIds || []) {
-        const info = getCheckIconInfoForId(checkId);
-        extraRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+      for (const itemId of layout.subbossItemIds || []) {
+        const info = getIconInfoForId(itemId);
+        extraRow.appendChild(makeGridIcon(info.file, info.label, isItemOwned(itemId)));
       }
       section.appendChild(extraRow);
     }

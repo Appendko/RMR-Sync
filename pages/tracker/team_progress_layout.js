@@ -70,7 +70,12 @@ var TEAM_PROGRESS_LAYOUT = {
       { file: "assets/bc.png", label: "Charge speed", ids: [624, 625, 626, 627] },
     ],
     rideArmorIds: [599, 598, 597, 596], // 3ItRideArmorF/H/K/N, F/H/K/N order
-    subbossCheckIds: [750, 751, 761], // 3ChVajurilaFF, 3ChMandarelaBB, 3ChVAClear
+    // Vajurila FF/Mandarela BB/Vava are tracked by their "victory" key items
+    // (573/574/575), not by the raw defeat checks (750/751/761) -- the
+    // checks fire the instant the fight is won, but the intended tracker
+    // status is "Victory" (a distinct, later state), which corresponds to
+    // actually owning the key item, confirmed 2026-07-19.
+    subbossItemIds: [573, 574, 575], // 3ItKeyVajurila, 3ItKeyMandarela, 3ItKeyVava
     superWeaponId: 592, // Z-Saber
     gameClearCheckId: 902,
   },
