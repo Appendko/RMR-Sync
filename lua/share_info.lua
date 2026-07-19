@@ -109,16 +109,20 @@ local cInitBurstThreshold = 6 -- entering a title for the first time auto-initia
 -- even with this set far lower) keeps re-extending itself for as long as
 -- resets keep occurring, clearing only once they stop for a full
 -- cSettlingCooldownFrames stretch. statusLine's own dedup (same text
--- doesn't reprint) hides the repeated re-triggers from the console, which
--- is why this looked like a hard timeout before it was actually tested
--- down at this value. That self-extension is what makes a short value
--- here plausible instead of reckless: multi-step transitions cover
--- themselves regardless of this constant. The residual risk is a
--- genuinely single-step transition slower than this that never
--- re-triggers -- the first (2026-07-18) test batch saw single-step
--- transitions up to ~710 frames, just over this value; watch for the
--- dense-mergedItems symptom returning if that turns out to matter live.
-local cSettlingCooldownFrames = 600 -- ~10s at 60fps
+-- doesn't reprint) hides the repeated re-triggers from the console.
+--
+-- This was previously lowered to 600 (~10s), reasoning that self-extension
+-- covers slow multi-step transitions regardless of the constant, leaving
+-- only a genuinely single-step transition slower than it as residual risk.
+-- That risk was confirmed live, twice: a 2026-07-18 batch saw single-step
+-- transitions up to ~710 frames, and a 2026-07-19 hub-bouncing repro (die
+-- in X2 -> exit to level select -> switch X3 -> switch X1 -> X2) logged via
+-- debug/debug_watch_items_wram.lua showed EVERY transition's real
+-- correction (addrItems dropping from a transient hub-context 372 bits to
+-- the true 79) landing consistently at 654-741 frames -- reliably past 600,
+-- not a rare outlier. Raised to give real margin over that observed
+-- ceiling rather than just clearing it.
+local cSettlingCooldownFrames = 900 -- ~15s at 60fps
 
 local function currentTitle()
     local tmp = cpu[0x80FFC9] - 0x30
