@@ -55,6 +55,15 @@ let totalDeaths = 0;
 let totalIfgUses = 0;
 let shareFlags = {};
 let randomizedGames = [true, true, true];
+// Per-title array of required Sigma-key counts, one entry per "lock" --
+// static per-seed data synced from lua/share_info.lua's
+// readSigmaKeyRequirements (read from ROM at addrRequiredSigmaKeys). Empty
+// per-title arrays (the default before the first sync/init arrives, or from
+// an older Lua client that predates this field) mean "unknown" -- treated as
+// "not yet unlocked" (the safe default, matching the plain dim/grayscale
+// look every not-done icon already had before this feature existed) rather
+// than guessing a stage is available when we can't actually tell.
+let sigmaKeyRequirements = [[], [], []];
 
 function toProgressWebSocketUrl(workerUrl, room) {
   const httpUrl = new URL(`/room/${encodeURIComponent(room)}/ws`, workerUrl);
@@ -90,6 +99,69 @@ function makeGridIcon(file, label, done) {
   }
   cell.appendChild(img);
   return cell;
+}
+
+// 3-state variant of makeGridIcon, used only for boss/Sigma-palace icons:
+// "locked" (no key yet -- same dim/grayscale look as a plain not-done icon),
+// "unlocked" (key owned/threshold met, not yet defeated -- full color, same
+// look as a plain done icon), "defeated" (grayed out at full opacity,
+// distinct from both). Deliberately separate CSS classes from .done rather
+// than reusing it, so every other icon type's simple 2-state look is
+// completely unaffected. lockRequirement, when given, renders as small gray
+// text overlaid on a locked icon so players can see how many more Sigma
+// keys they need.
+function makeGridIconTriState(file, label, state, lockRequirement) {
+  const cell = document.createElement("div");
+  cell.className = "icon-cell";
+  const img = document.createElement("img");
+  img.src = file;
+  img.alt = label;
+  img.title = label;
+  if (state === "unlocked" || state === "defeated") {
+    img.classList.add(state);
+  }
+  cell.appendChild(img);
+  if (state === "locked" && lockRequirement !== undefined) {
+    const badge = document.createElement("span");
+    badge.className = "lock-requirement";
+    badge.textContent = String(lockRequirement);
+    cell.appendChild(badge);
+  }
+  return cell;
+}
+
+// Bit-count of the room's collected Sigma-key items for a given title --
+// shared across all 3 titles as one pooled count when this seed's own
+// settings configured Sigma keys as shared (same convention
+// renderCommonBlock's own shared-gauge handling already uses).
+function countAvailableSigmaKeys(title) {
+  if (shareFlags.sigmaKey) {
+    const ids = [1, 2, 3].flatMap((t) => TEAM_PROGRESS_LAYOUT[t].gauges.find((g) => g.category === "sigmaKey").ids);
+    return ids.filter(isItemOwned).length;
+  }
+  return TEAM_PROGRESS_LAYOUT[title].gauges.find((g) => g.category === "sigmaKey").ids.filter(isItemOwned).length;
+}
+
+// Tri-state resolver for a boss icon: locked (no stage-access key owned),
+// unlocked (key owned, not yet defeated), defeated (check done).
+function bossIconState(bossCheckId, keyItemId) {
+  if (isTeamCheckDone(bossCheckId)) return "defeated";
+  return isItemOwned(keyItemId) ? "unlocked" : "locked";
+}
+
+// Tri-state resolver for one Sigma-palace stage entry (see
+// team_progress_layout.js's sigmaLockStages) -- locked (Sigma-key count
+// hasn't reached this lock's required threshold yet, or any extraItemIds
+// aren't all owned), unlocked (requirements met, not yet cleared), defeated
+// (check done). Returns { state, requirement } so a locked icon can show
+// its required key count.
+function sigmaLockState(title, stage) {
+  if (isTeamCheckDone(stage.checkId)) return { state: "defeated" };
+  const requirement = (sigmaKeyRequirements[title - 1] || [])[stage.lockIndex];
+  const haveEnoughKeys = requirement !== undefined && countAvailableSigmaKeys(title) >= requirement;
+  const extrasOwned = !stage.extraItemIds || stage.extraItemIds.every(isItemOwned);
+  if (haveEnoughKeys && extrasOwned) return { state: "unlocked" };
+  return { state: "locked", requirement };
 }
 
 function makeGaugeIcon(file, label, text) {
@@ -177,9 +249,10 @@ function renderProgressGrid() {
     bossRow.className = "icon-grid";
     const clearInfo = getCheckIconInfoForId(layout.gameClearCheckId);
     bossRow.appendChild(makeGridIcon(clearInfo.file, clearInfo.label, isTeamCheckDone(layout.gameClearCheckId)));
-    for (const checkId of layout.bossCheckIds) {
+    for (let i = 0; i < layout.bossCheckIds.length; i++) {
+      const checkId = layout.bossCheckIds[i];
       const info = getCheckIconInfoForId(checkId);
-      bossRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+      bossRow.appendChild(makeGridIconTriState(info.file, info.label, bossIconState(checkId, layout.bossKeyIds[i])));
     }
     section.appendChild(bossRow);
 
@@ -196,11 +269,18 @@ function renderProgressGrid() {
     sigmaRow.className = "icon-grid";
     const superInfo = getIconInfoForId(layout.superWeaponId);
     sigmaRow.appendChild(makeGridIcon(superInfo.file, superInfo.label, isItemOwned(layout.superWeaponId)));
-    const openingInfo = getCheckIconInfoForId(layout.openingCheckId);
-    sigmaRow.appendChild(makeGridIcon(openingInfo.file, openingInfo.label, isTeamCheckDone(layout.openingCheckId)));
-    for (const checkId of layout.sigmaCheckIds) {
-      const info = getCheckIconInfoForId(checkId);
-      sigmaRow.appendChild(makeGridIcon(info.file, info.label, isTeamCheckDone(checkId)));
+    for (const stage of layout.sigmaLockStages) {
+      let file, label;
+      if (stage.isSigma) {
+        file = `assets/x${title}_sigma_boss.gif`;
+        label = "Sigma";
+      } else {
+        const info = getCheckIconInfoForId(stage.checkId);
+        file = info.file;
+        label = info.label;
+      }
+      const { state, requirement } = sigmaLockState(title, stage);
+      sigmaRow.appendChild(makeGridIconTriState(file, label, state, requirement));
     }
     section.appendChild(sigmaRow);
 
@@ -243,6 +323,7 @@ function applyProgressState(msg) {
   if (msg.totalIfgUses !== undefined) totalIfgUses = msg.totalIfgUses;
   if (msg.shareFlags !== undefined) shareFlags = msg.shareFlags;
   if (msg.randomizedGames !== undefined) randomizedGames = msg.randomizedGames;
+  if (msg.sigmaKeyRequirements !== undefined) sigmaKeyRequirements = msg.sigmaKeyRequirements;
   renderProgressGrid();
 }
 

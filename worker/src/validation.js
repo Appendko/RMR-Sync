@@ -125,3 +125,24 @@ export function isValidRandomizedGames(value) {
   if (value === undefined) return true;
   return Array.isArray(value) && value.length === 3 && value.every((v) => typeof v === "boolean");
 }
+
+// Optional field on the /sync body -- per-title array of required Sigma-key
+// counts, one byte per "lock" (read from ROM by lua/share_info.lua's
+// readSigmaKeyRequirements, static for the whole session -- this hack's own
+// randomizer randomizes the exact thresholds per seed, so there's no fixed
+// number to validate against, only the shape). Lock count per title is
+// fixed at 5/6/5 (X1/X2/X3), confirmed against ref/RMR/AutoTracker/
+// AutoTracker.lua's own `locks` values. Older Lua clients that predate this
+// field simply omit it, so `undefined` is valid too -- same pattern as
+// isValidShareFlags/isValidRandomizedGames.
+const SIGMA_LOCKS_PER_TITLE = [5, 6, 5];
+export function isValidSigmaKeyRequirements(value) {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length !== 3) return false;
+  return value.every(
+    (locks, i) =>
+      Array.isArray(locks) &&
+      locks.length === SIGMA_LOCKS_PER_TITLE[i] &&
+      locks.every((v) => Number.isInteger(v) && v >= 0 && v <= 255)
+  );
+}

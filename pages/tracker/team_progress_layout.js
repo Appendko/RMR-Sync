@@ -7,10 +7,28 @@
 var TEAM_PROGRESS_LAYOUT = {
   1: {
     titleIcon: "assets/title_x1.ico",
-    openingCheckId: 240,
     bossCheckIds: [241, 242, 243, 244, 245, 246, 247, 248], // LO, SC, AA, BN, SE, SM, BK, IP
+    // One dedicated "stage access key" item per boss, same order as
+    // bossCheckIds -- confirmed 2026-07-19: a boss icon is "locked" (no key
+    // yet), "unlocked" (key owned, not yet defeated), or "defeated", not the
+    // old simple 2-state look.
+    bossKeyIds: [48, 49, 50, 51, 52, 53, 54, 55],
     weaponIds: [40, 41, 42, 43, 44, 45, 46, 47],
-    sigmaCheckIds: [249, 250, 251],
+    // Sigma-palace progression row, in intended display order (not raw
+    // check-id order). lockIndex indexes into sigmaKeyRequirements[title]
+    // (synced from lua/share_info.lua's readSigmaKeyRequirements, read from
+    // ROM at addrRequiredSigmaKeys) -- "unlocked" once the room's collected
+    // Sigma-key count reaches that lock's required threshold. isSigma marks
+    // the final boss slot, rendered with the dedicated x{title}_sigma_boss.gif
+    // portrait instead of a check-id icon lookup. Confirmed 2026-07-19
+    // (X1/X2 have no a/b split the way X3 does).
+    sigmaLockStages: [
+      { checkId: 240, lockIndex: 0 }, // Intro
+      { checkId: 249, lockIndex: 1 },
+      { checkId: 250, lockIndex: 2 },
+      { checkId: 251, lockIndex: 3 },
+      { checkId: 900, lockIndex: 4, isSigma: true },
+    ],
     armor: [[88, 89], [90, 91], [92, 93], [94, 95]], // Head, Arm, Body, Foot (Part id, Chip id)
     subtankIds: [36, 37, 38, 39],
     gauges: [
@@ -29,10 +47,17 @@ var TEAM_PROGRESS_LAYOUT = {
   },
   2: {
     titleIcon: "assets/title_x2.ico",
-    openingCheckId: 496,
     bossCheckIds: [497, 498, 499, 500, 501, 502, 503, 504], // MM, WH, BC, FS, MH, CM, SO, WA
+    bossKeyIds: [304, 305, 306, 307, 308, 309, 310, 311],
     weaponIds: [296, 297, 298, 299, 300, 301, 302, 303],
-    sigmaCheckIds: [505, 506, 507, 508], // 508 = stage-4 8-Maverick refight, no single boss
+    sigmaLockStages: [
+      { checkId: 496, lockIndex: 0 }, // Intro
+      { checkId: 505, lockIndex: 1 },
+      { checkId: 506, lockIndex: 2 },
+      { checkId: 507, lockIndex: 3 },
+      { checkId: 508, lockIndex: 4 }, // stage-4 8-Maverick refight, no single boss
+      { checkId: 901, lockIndex: 5, isSigma: true },
+    ],
     armor: [[344, 345], [346, 347], [348, 349], [350, 351]],
     subtankIds: [292, 293, 294, 295],
     gauges: [
@@ -52,10 +77,24 @@ var TEAM_PROGRESS_LAYOUT = {
   },
   3: {
     titleIcon: "assets/title_x3.ico",
-    openingCheckId: 752,
     bossCheckIds: [753, 754, 755, 756, 757, 758, 759, 760], // EH, FB, GB, AS, EN, SS, SM, ST
+    bossKeyIds: [560, 561, 562, 563, 564, 565, 566, 567],
     weaponIds: [552, 553, 554, 555, 556, 557, 558, 559],
-    sigmaCheckIds: [762, 763, 764, 765, 766], // S1a, S2a, S3, S1b, S2b
+    // X3's locks are more complex than X1/X2 -- lock 1 gates BOTH S1a (762)
+    // and S1b (765), lock 2 gates both S2a (763) and S2b (766); the "b"
+    // stages additionally require specific "Victory over" key items beyond
+    // just the Sigma-key threshold (confirmed 2026-07-19). Display order
+    // (Intro, S1a, S1b, S2a, S2b, S3, Sigma) intentionally does NOT match
+    // raw check-id ascending order.
+    sigmaLockStages: [
+      { checkId: 752, lockIndex: 0 }, // Intro
+      { checkId: 762, lockIndex: 1 }, // S1a
+      { checkId: 765, lockIndex: 1, extraItemIds: [573, 574] }, // S1b: + Victory over Bit & Byte
+      { checkId: 763, lockIndex: 2 }, // S2a
+      { checkId: 766, lockIndex: 2, extraItemIds: [575] }, // S2b: + Victory over Vile
+      { checkId: 764, lockIndex: 3 }, // S3
+      { checkId: 902, lockIndex: 4, isSigma: true },
+    ],
     armor: [[600, 601], [602, 603], [604, 605], [606, 607]],
     subtankIds: [548, 549, 550, 551],
     gauges: [

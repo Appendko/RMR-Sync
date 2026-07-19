@@ -35,9 +35,26 @@
 
   .icon-grid { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; margin-bottom: 0.35em; }
 
-  .icon-cell { padding: 6%; aspect-ratio: 1; }
+  .icon-cell { position: relative; padding: 6%; aspect-ratio: 1; }
   .icon-cell img { width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; image-rendering: pixelated; filter: grayscale(100%) brightness(0.55); opacity: 0.45; transition: filter 0.4s ease, opacity 0.4s ease; }
   .icon-cell img.done { filter: none; opacity: 1; }
+  /* 3-state boss/Sigma-palace icons (see sync_relay.js's makeGridIconTriState):
+     no class ("locked") reuses the plain dim/grayscale look above; .unlocked
+     matches .done's full color; .defeated is a distinct desaturated-but-
+     fully-visible look, so "beaten" never looks identical to either
+     "still locked" or "available but not beaten yet". */
+  .icon-cell img.unlocked { filter: none; opacity: 1; }
+  .icon-cell img.defeated { filter: grayscale(100%); opacity: 1; }
+  .icon-cell .lock-requirement {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    font-size: 0.7em;
+    font-weight: 700;
+    color: #999;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+  }
 
   .gauge-cell { position: relative; padding: 6%; aspect-ratio: 1; }
   .gauge-cell img { width: 100%; height: 100%; object-fit: contain; display: block; image-rendering: pixelated; }

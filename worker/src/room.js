@@ -1,5 +1,5 @@
 import { orMergeBytes, countSetBits, setBit } from "./bits.js";
-import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidItemsArray, isValidEpoch, isValidShareFlags, isValidRandomizedGames, validateEventBody } from "./validation.js";
+import { isValidMode, isValidAdminSecret, isValidChecksSeenArray, isValidItemsArray, isValidEpoch, isValidShareFlags, isValidRandomizedGames, isValidSigmaKeyRequirements, validateEventBody } from "./validation.js";
 import { shareCategoryForId } from "./shareCategories.js";
 
 const CHECKS_SEEN_LENGTH = 96;
@@ -138,6 +138,7 @@ export class RoomDO {
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.state.storage.put("randomizedGames", [true, true, true]);
+    await this.state.storage.put("sigmaKeyRequirements", [[], [], []]);
     await this.scheduleExpiry();
     return jsonResponse({ mode: body.mode, created: true });
   }
@@ -181,6 +182,7 @@ export class RoomDO {
     await this.state.storage.put("events", []);
     await this.state.storage.put("shareFlags", {});
     await this.state.storage.put("randomizedGames", [true, true, true]);
+    await this.state.storage.put("sigmaKeyRequirements", [[], [], []]);
     await this.scheduleExpiry();
     this.recentlyPosted.clear();
     return jsonResponse({ ok: true, mode: newMode });
@@ -215,9 +217,10 @@ export class RoomDO {
       !isValidItemsArray(body.items) ||
       !isValidEpoch(body.epoch) ||
       !isValidShareFlags(body.shareFlags) ||
-      !isValidRandomizedGames(body.randomizedGames)
+      !isValidRandomizedGames(body.randomizedGames) ||
+      !isValidSigmaKeyRequirements(body.sigmaKeyRequirements)
     ) {
-      return jsonResponse({ error: "invalid checksSeen, items, epoch, shareFlags, or randomizedGames" }, 400);
+      return jsonResponse({ error: "invalid checksSeen, items, epoch, shareFlags, randomizedGames, or sigmaKeyRequirements" }, 400);
     }
     const currentEpoch = (await this.state.storage.get("resetEpoch")) ?? 0;
     const storedChecksSeen = (await this.state.storage.get("checksSeen")) ?? new Array(CHECKS_SEEN_LENGTH).fill(0);
@@ -233,6 +236,10 @@ export class RoomDO {
       await this.state.storage.put("randomizedGames", body.randomizedGames);
     }
     const randomizedGames = (await this.state.storage.get("randomizedGames")) ?? [true, true, true];
+    if (body.sigmaKeyRequirements !== undefined) {
+      await this.state.storage.put("sigmaKeyRequirements", body.sigmaKeyRequirements);
+    }
+    const sigmaKeyRequirements = (await this.state.storage.get("sigmaKeyRequirements")) ?? [[], [], []];
 
     let checksSeen = storedChecksSeen;
     let mergedItems = storedMergedItems;
@@ -254,7 +261,7 @@ export class RoomDO {
     }
 
     await this.scheduleExpiry();
-    return jsonResponse({ mode, checksSeen, epoch: currentEpoch, shareFlags, randomizedGames, mergedItems });
+    return jsonResponse({ mode, checksSeen, epoch: currentEpoch, shareFlags, randomizedGames, sigmaKeyRequirements, mergedItems });
   }
 
   async handleEvent(request) {
@@ -381,11 +388,12 @@ export class RoomDO {
     const backlog = (await this.state.storage.get("events")) ?? [];
     const shareFlags = (await this.state.storage.get("shareFlags")) ?? {};
     const randomizedGames = (await this.state.storage.get("randomizedGames")) ?? [true, true, true];
+    const sigmaKeyRequirements = (await this.state.storage.get("sigmaKeyRequirements")) ?? [[], [], []];
     const teamChecks = (await this.state.storage.get("teamChecks")) ?? [];
     const mergedItems = (await this.state.storage.get("mergedItems")) ?? new Array(ITEMS_LENGTH).fill(0);
     const totalDeaths = (await this.state.storage.get("totalDeaths")) ?? 0;
     const totalIfgUses = (await this.state.storage.get("totalIfgUses")) ?? 0;
-    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags, randomizedGames, teamChecks, mergedItems, totalDeaths, totalIfgUses }));
+    server.send(JSON.stringify({ type: "init", mode, backlog, shareFlags, randomizedGames, sigmaKeyRequirements, teamChecks, mergedItems, totalDeaths, totalIfgUses }));
 
     server.addEventListener("close", () => this.sockets.delete(server));
     server.addEventListener("error", () => this.sockets.delete(server));

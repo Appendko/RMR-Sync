@@ -57,6 +57,16 @@ local cCheckIdGameClearAll = 903
 -- across all 3 games (see readShareFlags below). Static for the whole
 -- session, so it's safe to read once.
 local addrMultiworldInfo = {0xBFFDD0, 0xBFFDD0, 0xCFFDD0}
+-- Per-title, per-"lock" required Sigma-key counts, one byte per lock --
+-- confirmed against ref/RMR/AutoTracker/AutoTracker.lua's own addrKeys/locks
+-- constants (this hack's own randomizer randomizes the exact threshold per
+-- seed, see ref/RMR/src/randomizer.cs's requiredSigmaKeysPerTitlePerLock,
+-- so there is no fixed number to hardcode -- it must be read from ROM).
+-- X1 and X2 share the same physical address (same sharing pattern as
+-- addrMultiworldInfo above); X3 uses a different bank. Lock count per title
+-- (5/6/5) matches AutoTracker.lua's own `locks` values exactly.
+local addrRequiredSigmaKeys = {0xBFFDC0, 0xBFFDC0, 0xCFFDC0}
+local cSigmaLocksPerTitle = {5, 6, 5}
 -- ref/RMR_progress_tracker_displayer_ver_js_20260126/progress_tracker_js/
 -- RMR_progress_tracker.lua's own addresses, reused verbatim (see design spec
 -- decision 5/"Reference material"): a single global IFG-use counter, and a
@@ -166,6 +176,25 @@ local function readRandomizedGames()
         randomized[title] = (multiworldValue & (0x10 << (title - 1))) ~= 0
     end
     return randomized
+end
+
+-- Reads each title's own array of required-Sigma-key-count thresholds, one
+-- byte per "lock" (see addrRequiredSigmaKeys/cSigmaLocksPerTitle above) --
+-- static ROM data for the whole session, same as shareFlags/randomizedGames,
+-- so it's safe to read once. tracker/team_progress_layout.js's own
+-- sigmaLockStages data (per-title lockIndex -> check id mapping) is what
+-- interprets which byte in this array gates which specific stage; this
+-- function only reads the raw numbers.
+local function readSigmaKeyRequirements()
+    local requirements = {}
+    for title = 1, 3 do
+        local reqs = {}
+        for i = 0, cSigmaLocksPerTitle[title] - 1 do
+            reqs[i + 1] = cpu[addrRequiredSigmaKeys[title] + i]
+        end
+        requirements[title] = reqs
+    end
+    return requirements
 end
 
 local function readChecksSeen()
@@ -313,6 +342,9 @@ local shareFlags = readShareFlags()
 -- Read once, same reasoning: which titles this seed randomizes never
 -- changes mid-session.
 local randomizedGames = readRandomizedGames()
+-- Read once, same reasoning: this seed's randomized Sigma-key thresholds
+-- never change mid-session.
+local sigmaKeyRequirements = readSigmaKeyRequirements()
 local seq = 0
 local outstandingSeq = nil
 local pendingEvents = {}
@@ -407,7 +439,7 @@ local function issueRequest()
         workerUrl = cfg.worker_url,
         roomKey = ShareLogic.extractSeedKey(sessionSave.param),
         player = cfg.player_name,
-        sync = { checksSeen = checksSeenToSend, items = itemsToSend, epoch = knownEpoch, shareFlags = shareFlags, randomizedGames = randomizedGames },
+        sync = { checksSeen = checksSeenToSend, items = itemsToSend, epoch = knownEpoch, shareFlags = shareFlags, randomizedGames = randomizedGames, sigmaKeyRequirements = sigmaKeyRequirements },
         events = pendingEvents,
     }, gameDir)
 end
