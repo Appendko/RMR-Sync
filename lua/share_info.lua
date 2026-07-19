@@ -531,9 +531,18 @@ local function checkForNewGameClear()
                 table.insert(pendingEvents, { game = title, checks = { cCheckIdGameClear[title] } })
                 issueRequest()
             end
+            -- Latch true, never regress back to false -- see
+            -- checkForNewDeaths/checkForNewIfg's own comment for why:
+            -- titleValue is synced via the same "keep the higher value"
+            -- pattern, so it can briefly read a stale, lower byte right
+            -- after a reload. Letting the baseline regress would make the
+            -- correction back to true on a later cycle look like a second,
+            -- duplicate game-clear event.
+            previousGameClear[title] = previousGameClear[title] or flagsNow[title]
         end
+    else
+        previousGameClear = flagsNow
     end
-    previousGameClear = flagsNow
 
     local allClearNow = true
     for title = 1, 3 do
@@ -546,7 +555,12 @@ local function checkForNewGameClear()
         table.insert(pendingEvents, { game = currentTitle(), checks = { cCheckIdGameClearAll }, gameClearTime = clearTime })
         issueRequest()
     end
-    previousAllClear = allClearNow
+    -- Same latch-true-never-regress reasoning as previousGameClear above.
+    if previousAllClear == nil then
+        previousAllClear = allClearNow
+    else
+        previousAllClear = previousAllClear or allClearNow
+    end
 end
 
 -- Reports IFG (Invincible Frame Generator) usage as a one-off event each
@@ -561,7 +575,19 @@ local function checkForNewIfg()
         table.insert(pendingEvents, { game = currentTitle(), ifgDelta = delta })
         issueRequest()
     end
-    previousIfg = ifgNow
+    -- Never let the baseline regress. addrIFG is synced via boot.lua's own
+    -- "keep the higher value" pattern (see the top-of-file comment), so it
+    -- can briefly read a stale, lower value right after a reload -- skipping
+    -- this whole function during settling (see checkForRomReload) only
+    -- guards the window right after a reload, it can't guarantee THIS
+    -- specific value has finished correcting back up by the moment settling
+    -- clears and this resumes. Adopting a transient dip as the new baseline
+    -- would make the real correction back up, on a later cycle, read as a
+    -- second, duplicate IFG report -- live-observed for the death counter
+    -- below (2026-07-19), same root cause here.
+    if previousIfg == nil or ifgNow > previousIfg then
+        previousIfg = ifgNow
+    end
 end
 
 -- Structural sibling of checkForNewIfg, tracking each title's own death
@@ -577,7 +603,19 @@ local function checkForNewDeaths()
         table.insert(pendingEvents, { game = title, deathDelta = delta })
         issueRequest()
     end
-    previousDeathByTitle[title] = deathsNow
+    -- Never let the baseline regress -- see checkForNewIfg's own comment for
+    -- why (same "keep the higher value" sync pattern, same duplicate-report
+    -- risk). Confirmed live (2026-07-19): dying, then switching games (which
+    -- this randomizer's own flow routinely does right after a death) used to
+    -- report the same death twice -- addrDeathByTitle briefly read a stale,
+    -- lower count than the already-reported one once settling cleared and
+    -- this function resumed, got adopted as the new baseline unconditionally
+    -- (the old `previousDeathByTitle[title] = deathsNow` below with no
+    -- guard), and the real correction back up on the next cycle then looked
+    -- like a second death.
+    if previousDeathByTitle[title] == nil or deathsNow > previousDeathByTitle[title] then
+        previousDeathByTitle[title] = deathsNow
+    end
 end
 
 -- Local-only, single-player consistency fix, no server round-trip at all:
