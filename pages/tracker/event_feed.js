@@ -373,20 +373,20 @@ function main() {
   // own game's tag until then.
   let shareFlags = {};
 
-  // Appends an already-built element to the log, trimming the oldest entry
-  // off the front whenever maxLines is set and exceeded -- used for both
-  // real item entries and status messages, so status lines are just another
-  // entry in the same capped stream and naturally get pushed out by newer
-  // ones (item pickups or later status updates) rather than staying pinned
-  // as a permanent header.
+  // Prepends an already-built element to the log -- newest entry on top --
+  // trimming the oldest entry off the bottom whenever maxLines is set and
+  // exceeded. Used for both real item entries and status messages, so
+  // status lines are just another entry in the same capped stream and
+  // naturally get pushed out by newer ones (item pickups or later status
+  // updates) rather than staying pinned as a permanent header.
   function appendToLog(el) {
-    log.appendChild(el);
+    log.insertBefore(el, log.firstElementChild);
     if (maxLines) {
       while (log.children.length > maxLines) {
-        log.firstElementChild.remove();
+        log.lastElementChild.remove();
       }
     }
-    log.scrollTop = log.scrollHeight;
+    log.scrollTop = 0;
   }
 
   function appendStatusLine(text) {
@@ -408,9 +408,13 @@ function main() {
         rendered.push(el);
       }
     }
+    // rendered is oldest-first (allEvents' own arrival order); slice(-maxLines)
+    // keeps the newest maxLines of those, then the loop below walks it
+    // backwards so the newest entry ends up first in the DOM -- matching
+    // appendToLog's own newest-on-top convention for live-arriving entries.
     const toShow = maxLines ? rendered.slice(-maxLines) : rendered;
-    for (const el of toShow) {
-      log.appendChild(el);
+    for (let i = toShow.length - 1; i >= 0; i--) {
+      log.appendChild(toShow[i]);
     }
   }
 
