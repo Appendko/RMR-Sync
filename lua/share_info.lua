@@ -467,23 +467,33 @@ local function checkForNewChecks()
     local checksNow = readChecks()
     if previousChecks then
         local acquired = ShareLogic.diffNewBits(previousChecks, checksNow)
-        -- Burst-suppression is checked against the full diff (matching
-        -- items), not just the event-filtered subset, so an init burst
-        -- doesn't get chopped down to "under threshold" by filtering first.
-        if ShareLogic.shouldReportAcquired(#acquired, cInitBurstThreshold) then
-            local eventChecks = {}
-            for _, id in ipairs(acquired) do
-                if ShareLogic.isEventCheckId(id) then
-                    table.insert(eventChecks, id)
-                end
+        local eventChecks = {}
+        for _, id in ipairs(acquired) do
+            if ShareLogic.isEventCheckId(id) then
+                table.insert(eventChecks, id)
             end
-            -- A batch that's entirely plain-location checks (no event ids)
-            -- has nothing worth announcing -- randomized-item ownership is
-            -- already covered by the items merge, not this local-only path.
-            if #eventChecks > 0 then
-                table.insert(pendingEvents, { game = currentTitle(), checks = eventChecks })
-                issueRequest()
-            end
+        end
+        -- Report any event checks (boss defeats/stage clears) regardless of
+        -- the OVERALL batch size -- deliberately NOT gated by
+        -- cInitBurstThreshold the way items are. A title-first-entry
+        -- initialization burst can never include an event id (you can't
+        -- auto-complete a boss defeat just by entering a title, only plain
+        -- location checks get auto-set that way), so the presence of even
+        -- one event id already proves this diff is real progress, not
+        -- initialization noise -- no batch-size heuristic needed on top.
+        -- Confirmed live (2026-07-19): defeating X3's Gravity Beetle set 9
+        -- check bits in one atomic update (GB's own defeat bit plus 8
+        -- nearby location checks, presumably unlocked as a side effect of
+        -- clearing the stage) -- comfortably over the old
+        -- cInitBurstThreshold=6 -- which silently swallowed the ENTIRE
+        -- batch, GB's own defeat included, even though nothing about it was
+        -- noise. A batch that's entirely plain-location checks (no event
+        -- ids) still has nothing worth announcing either way -- randomized-
+        -- item ownership is already covered by the items merge, not this
+        -- local-only path.
+        if #eventChecks > 0 then
+            table.insert(pendingEvents, { game = currentTitle(), checks = eventChecks })
+            issueRequest()
         end
     end
     previousChecks = checksNow
